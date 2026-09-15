@@ -37,7 +37,7 @@ from ..data.windows import build_windows
 from ..explain.explainer import ForecastExplainer
 from ..models.base import Forecast
 
-__all__ = ["AnalysisResult", "ThreatForecastEngine", "load_capture"]
+__all__ = ["AnalysisResult", "ThreatForecastEngine", "load_capture", "serialise_result"]
 
 PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap", ".dmp"}
 
@@ -237,6 +237,49 @@ class ThreatForecastEngine:
                 "retransmissions": int(row.get("retransmission_count", 0)),
             })
         return out
+
+
+def serialise_result(result: AnalysisResult) -> dict:
+    """The wire format both the batch dashboard and live mode send to the browser.
+
+    One function so a window analysed from an uploaded file and a window
+    analysed from a live capture look identical on the frontend -- the UI
+    never needs to know which one it's looking at.
+    """
+    payload = {
+        "source": Path(result.source).name if "/" in str(result.source) or "\\" in str(result.source)
+                  else str(result.source),
+        "source_kind": result.source_kind,
+        "headline": result.headline(),
+        "n_windows": result.n_windows,
+        "n_flows": result.n_flows,
+        "window_size_s": result.window_size_s,
+        "peak_window": result.peak_window,
+        "peak_risk": result.peak_risk,
+        "notes": result.notes,
+        "timeline": result.timeline,
+        "forecast": result.forecast.timeline() if result.forecast else [],
+        "flagged_flows": result.flagged_flows,
+    }
+    explanation = result.explanation
+    if explanation:
+        infil = explanation["infiltration_explanation"]
+        payload["explanation"] = {
+            "stage": explanation["predicted_stage"],
+            "stage_description": explanation["stage_description"],
+            "prediction": infil.prediction,
+            "base_value": infil.base_value,
+            "drivers": infil.drivers(),
+            "key_windows": infil.key_windows(),
+            "temporal_source": infil.temporal_source,
+            "temporal": [float(v) for v in infil.temporal],
+            "rules": infil.rule_reasons,
+            "efficiency_error": infil.efficiency_error,
+            "rule_scores": {k: float(v) for k, v in explanation["rule_scores"].items()},
+        }
+    else:
+        payload["explanation"] = None
+    return payload
 
 
 def _flag_summary(row: pd.Series) -> str:

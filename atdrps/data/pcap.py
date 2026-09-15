@@ -39,7 +39,8 @@ from .schema import (
     ip_to_int,
 )
 
-__all__ = ["read_pcap", "write_pcap", "iter_pcap_records", "PcapFormatError"]
+__all__ = ["read_pcap", "write_pcap", "iter_pcap_records", "PcapFormatError",
+           "decode_frame", "LINKTYPE_ETHERNET", "LINKTYPE_RAW"]
 
 
 class PcapFormatError(ValueError):
@@ -145,6 +146,20 @@ def _decode_l4(buf: memoryview, rec: PacketRecord, l4_len: int) -> None:
         rec.payload_len = max(0, l4_len - 8)
     else:
         rec.payload_len = max(0, l4_len)
+
+
+def decode_frame(linktype: int, data: bytes, ts: float) -> PacketRecord | None:
+    """Public entry point for decoding one raw link-layer frame.
+
+    This is the exact function offline pcap reading uses internally
+    (:func:`_decode_link`) -- live capture calls it too, so a packet that
+    came off a live socket and one read back from a saved ``.pcap`` are
+    parsed by byte-for-byte the same code.  ``linktype`` is a pcap DLT_*
+    value; :data:`LINKTYPE_ETHERNET` for a full Ethernet frame (what Linux
+    ``AF_PACKET`` capture hands back) or :data:`LINKTYPE_RAW` for a bare IP
+    packet with no link header (what Windows raw-IP capture hands back).
+    """
+    return _decode_link(linktype, data, ts)
 
 
 def _decode_link(linktype: int, data: bytes, ts: float) -> PacketRecord | None:

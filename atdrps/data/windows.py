@@ -234,6 +234,7 @@ def build_windows(
     infiltration_stages=DEFAULT_INFILTRATION_STAGES,
     use_labels: bool = True,
     history_s: float = 600.0,
+    t_end: float | None = None,
 ) -> WindowedStates:
     """Aggregate a flow table into a time-ordered sequence of state vectors.
 
@@ -249,6 +250,16 @@ def build_windows(
     absent too, every window is labelled benign and ``stage_mask`` is cleared,
     so an unlabelled capture can still be *scored* but never silently trains
     anything.
+
+    ``t_end`` anchors the last window edge to a caller-supplied time instead of
+    the last flow's *start* time.  A finished capture has no "now" -- the last
+    flow to start is as good an endpoint as any -- but a live rolling buffer
+    does, and it matters: a single long-lived flow (one persistent connection,
+    a steady beacon) starts once and then never moves ``start_ts`` again, so
+    without an explicit ``t_end`` the window count would stay frozen at 1
+    forever even as real wall-clock time keeps passing and new packets keep
+    arriving on that same flow. Live mode passes ``time.time()`` every tick;
+    offline analysis leaves this ``None`` and keeps its original behaviour.
     """
     stride_s = float(stride_s or window_size_s)
     names = state_feature_names()
@@ -262,7 +273,9 @@ def build_windows(
 
     flows = flows.sort_values("start_ts", kind="stable").reset_index(drop=True)
     start_ts = flows["start_ts"].to_numpy(dtype=float)
-    t0, t1 = float(start_ts[0]), float(start_ts[-1])
+    t0 = float(start_ts[0])
+    t1 = float(t_end) if t_end is not None else float(start_ts[-1])
+    t1 = max(t1, t0)
     n_windows = max(1, int(np.floor((t1 - t0) / stride_s)) + 1)
     edges = t0 + np.arange(n_windows + 1) * stride_s
 

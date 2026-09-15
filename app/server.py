@@ -23,7 +23,7 @@ from flask import Flask, jsonify, render_template, request
 
 from atdrps.config import Config
 from atdrps.data.mitre import MITRE_TACTICS, describe_stage
-from atdrps.engine.inference import ThreatForecastEngine
+from atdrps.engine.inference import ThreatForecastEngine, serialise_result
 
 __all__ = ["create_app"]
 
@@ -122,42 +122,8 @@ def create_app(model_dir: str | Path = "artifacts/model-linear",
                     "detail": traceback.format_exc(limit=3),
                 }), 400
 
-        return jsonify(_serialise(result))
+        payload = serialise_result(result)
+        payload["source"] = Path(result.source).name
+        return jsonify(payload)
 
     return app
-
-
-def _serialise(result) -> dict:
-    payload = {
-        "source": Path(result.source).name,
-        "source_kind": result.source_kind,
-        "headline": result.headline(),
-        "n_windows": result.n_windows,
-        "n_flows": result.n_flows,
-        "window_size_s": result.window_size_s,
-        "peak_window": result.peak_window,
-        "peak_risk": result.peak_risk,
-        "notes": result.notes,
-        "timeline": result.timeline,
-        "forecast": result.forecast.timeline() if result.forecast else [],
-        "flagged_flows": result.flagged_flows,
-    }
-    explanation = result.explanation
-    if explanation:
-        infil = explanation["infiltration_explanation"]
-        payload["explanation"] = {
-            "stage": explanation["predicted_stage"],
-            "stage_description": explanation["stage_description"],
-            "prediction": infil.prediction,
-            "base_value": infil.base_value,
-            "drivers": infil.drivers(),
-            "key_windows": infil.key_windows(),
-            "temporal_source": infil.temporal_source,
-            "temporal": [float(v) for v in infil.temporal],
-            "rules": infil.rule_reasons,
-            "efficiency_error": infil.efficiency_error,
-            "rule_scores": {k: float(v) for k, v in explanation["rule_scores"].items()},
-        }
-    else:
-        payload["explanation"] = None
-    return payload
