@@ -34,17 +34,19 @@ as phases land.
 
 ## SIH deliverable checklist
 
-- [ ] Source code (open source, public repo)
-- [ ] README with setup instructions
-- [ ] Architecture document (max 2 pages)
-- [ ] Demo video (max 2 minutes)
-- [ ] Technical presentation (max 5 slides)
-- [ ] Feature extraction pipeline — CSV **and** PCAP
-- [ ] Trained world model + training scripts + reproducible config + weights
-- [ ] Infiltration prediction engine with K-step forward simulation
-- [ ] Explainability output (SHAP / attention)
-- [ ] Working offline interface
-- [ ] Benchmark results vs Logistic Regression baseline (F1, Precision, Recall, FPR)
+- [x] Source code (open source, public repo)
+- [x] README with setup instructions — plus `install.bat`/`install.sh`, `run.bat`/`run.sh`
+- [x] Architecture document (max 2 pages) — `docs/ARCHITECTURE.md`
+- [ ] Demo video (max 2 minutes) — script ready in `docs/DEMO_SCRIPT.md`, needs recording
+- [x] Technical presentation (max 5 slides) — `docs/ATDRPS_SIH26153.pptx`
+- [x] Feature extraction pipeline — CSV **and** PCAP
+- [x] Trained world model + training scripts + reproducible config + weights
+- [x] Infiltration prediction engine with K-step forward simulation
+- [x] Explainability output (SHAP / attention)
+- [x] Working offline interface
+- [x] Benchmark results vs Logistic Regression baseline (F1, Precision, Recall, FPR)
+- [x] Attack coverage analysis — `docs/ATTACK_COVERAGE.md` (added; not required, but it is
+      the question a reviewer asks first)
 
 ## Environment note
 

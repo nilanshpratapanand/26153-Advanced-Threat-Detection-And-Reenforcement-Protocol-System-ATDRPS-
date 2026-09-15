@@ -3,7 +3,7 @@
     "seed": 4242,
     "start_ts": 1767225600.0,
     "duration_s": 2400.0,
-    "n_packets": 79098,
+    "n_packets": 88767,
     "n_campaigns": 2,
     "continue_probs": [
       0.8,
@@ -11,6 +11,7 @@
       0.75,
       0.75
     ],
+    "n_incidents": 3,
     "internal_hosts": [
       "10.20.1.10",
       "10.20.3.11",
@@ -46,57 +47,102 @@
     "resolver": "10.20.0.2",
     "stage_counts": {
       "Reconnaissance": 2,
-      "InitialAccess": 2,
+      "InitialAccess": 3,
       "LateralMovement": 1,
-      "CommandAndControl": 0,
-      "Exfiltration": 0
+      "CommandAndControl": 1,
+      "Exfiltration": 2
     }
   },
   "timeline": [
     {
-      "start": 1767226588.3800476,
-      "end": 1767226617.7528284,
+      "start": 1767226104.7323506,
+      "end": 1767226352.9291227,
+      "stage": "Exfiltration",
+      "attacker": "10.20.3.12",
+      "victim": "10.20.0.2",
+      "campaign": -1,
+      "note": "DNS tunnelling"
+    },
+    {
+      "start": 1767226434.9008355,
+      "end": 1767226498.077827,
+      "stage": "InitialAccess",
+      "attacker": "110.22.36.109",
+      "victim": "10.20.0.15",
+      "campaign": -1,
+      "note": "web application probing"
+    },
+    {
+      "start": 1767226816.0799718,
+      "end": 1767226843.9648616,
       "stage": "Reconnaissance",
       "attacker": "185.11.167.209",
-      "victim": "10.20.1.19",
+      "victim": "10.20.0.14",
       "campaign": 0,
       "note": "fast port scan"
     },
     {
-      "start": 1767226638.1512341,
-      "end": 1767226783.5714324,
+      "start": 1767226860.5652347,
+      "end": 1767227071.9456887,
       "stage": "InitialAccess",
       "attacker": "185.11.167.209",
-      "victim": "10.20.1.19",
+      "victim": "10.20.0.14",
       "campaign": 0,
       "note": "credential brute force"
     },
     {
-      "start": 1767226840.7016656,
-      "end": 1767227190.2874844,
+      "start": 1767227138.504702,
+      "end": 1767227637.8894756,
       "stage": "LateralMovement",
-      "attacker": "10.20.1.19",
-      "victim": "10.20.2.16,10.20.0.21,10.20.0.15,10.20.2.13",
+      "attacker": "10.20.0.14",
+      "victim": "10.20.3.11,10.20.2.13,10.20.0.15,10.20.1.10,10.20.1.19,10.20.0.21",
       "campaign": 0,
       "note": "SMB/RDP/SSH spread"
     },
     {
-      "start": 1767227488.7934718,
-      "end": 1767227753.4188042,
+      "start": 1767227499.2657456,
+      "end": 1767227574.7413921,
       "stage": "Reconnaissance",
       "attacker": "185.240.113.232",
-      "victim": "10.20.0.14",
+      "victim": "10.20.2.13",
       "campaign": 1,
-      "note": "slow scan"
+      "note": "fast port scan"
     },
     {
-      "start": 1767227763.1039245,
+      "start": 1767227520.64446,
+      "end": 1767227544.5615923,
+      "stage": "Impact",
+      "attacker": "10.20.3.12",
+      "victim": "10.20.2.13,10.20.0.21",
+      "campaign": -1,
+      "note": "ransomware: mass SMB encryption"
+    },
+    {
+      "start": 1767227606.563766,
       "end": 1767228000.0,
       "stage": "InitialAccess",
       "attacker": "185.240.113.232",
-      "victim": "10.20.0.14",
+      "victim": "10.20.2.13",
       "campaign": 1,
       "note": "credential brute force (truncated by end of capture)"
+    },
+    {
+      "start": 1767227666.224666,
+      "end": 1767227890.0653737,
+      "stage": "CommandAndControl",
+      "attacker": "45.15.183.210",
+      "victim": "10.20.0.14",
+      "campaign": 0,
+      "note": "jittered beacon"
+    },
+    {
+      "start": 1767227901.3893323,
+      "end": 1767228000.0,
+      "stage": "Exfiltration",
+      "attacker": "45.15.183.210",
+      "victim": "10.20.0.14",
+      "campaign": 0,
+      "note": "bulk outbound transfer (truncated by end of capture)"
     }
   ]
 }

@@ -29,7 +29,7 @@ It learns the transition dynamics of network state,
 then rolls that model forward **K steps** from the current traffic snapshot to produce:
 
 1. an **infiltration probability timeline** over the next K windows,
-2. the **predicted MITRE ATT&CK stage** — Reconnaissance → Initial Access → Lateral Movement → Command & Control → Exfiltration,
+2. the **predicted MITRE ATT&CK stage** — Reconnaissance → Initial Access → Lateral Movement → Command & Control → Exfiltration, plus Impact for denial of service and ransomware,
 3. the **driving features** behind every prediction (SHAP values and attention weights) — never a black box.
 
 A slow port scan that stays under every per-flow threshold, or a brute force that resolves
@@ -43,16 +43,19 @@ thresholds are chosen on the validation split and applied unchanged to test.
 
 | model | F1 | Precision | Recall | **FPR** | Stage acc. |
 |---|---|---|---|---|---|
-| logistic regression (static — the classifier the PS criticises) | 0.9023 | 0.8757 | 0.9305 | 0.1589 | 0.7618 |
-| logistic regression (full context — a strong baseline) | 0.9375 | 0.9117 | 0.9647 | 0.1123 | 0.8209 |
-| **ATDRPS world model** | **0.9562** | **0.9425** | **0.9704** | **0.0712** | **0.8514** |
+| logistic regression (static — the classifier the PS criticises) | 0.8376 | 0.8417 | 0.8335 | 0.1660 | 0.7556 |
+| logistic regression (full context — a strong baseline) | 0.8947 | 0.9128 | 0.8773 | 0.0888 | 0.8013 |
+| **ATDRPS world model** | **0.9214** | **0.9317** | **0.9113** | **0.0708** | **0.8400** |
 
-The world model wins at **every** horizon step, and the margin **widens** the further
-ahead it forecasts (step 5: F1 0.905 vs 0.868, FPR 0.183 vs 0.233). That is the claim of
-the project, measured: a static classifier cannot look ahead.
+The world model wins at **every** horizon step (step 5: F1 0.842 vs 0.811, FPR 0.242 vs
+0.266), and it more than halves the false-positive rate of the static classifier the
+problem statement criticises. At the class level it is strongest where it matters —
+Command & Control F1 0.848, Exfiltration 0.859 — and weakest on `Impact`, F1 0.500 on 32
+test windows, which is simply too rare a class in this corpus to learn well. That is
+reported rather than hidden.
 
-**Does it actually model dynamics?** Next-state error **0.868** against a persistence
-floor of **1.520**. A model that beats a baseline on classification but cannot beat
+**Does it actually model dynamics?** Next-state error **0.611** against a persistence
+floor of **1.006**. A model that beats a baseline on classification but cannot beat
 "assume nothing changes" has learned a classifier, not a world model. This one clears the
 floor.
 
@@ -82,7 +85,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python tests/run_tests.py          # 215 tests, standard library only (no pytest)
+python tests/run_tests.py          # 234 tests, standard library only (no pytest)
 ```
 
 PyTorch is needed only for the temporal transformer backend; everything else — ingestion,
@@ -130,6 +133,22 @@ was discarded when the flows were built; `load_flow_csv` reports exactly which f
 could populate, so explainability can never name a packet-level driver on a run that never
 saw a packet. Feed the matching PCAPs to get the full dual-level state.
 
+## Which attacks does it actually catch?
+
+All 18 attack families in the team's taxonomy are answered one by one in
+[`docs/ATTACK_COVERAGE.md`](docs/ATTACK_COVERAGE.md) — including the ones ATDRPS
+**cannot** see, because claiming those would be the fastest way to lose a reviewer.
+
+| coverage | count | examples |
+|---|---|---|
+| **Full** — modelled as a stage, with generated training data | 9 | ransomware, worms, trojans, DoS/DDoS, DNS tunnelling, brute force, credential stuffing |
+| **Partial** — visible through consequences, not the act | 6 | phishing, MitM, DNS spoofing, SQL injection |
+| **Out of scope** — needs a different sensor | 3 | XSS, the zero-day exploit itself, session hijacking |
+
+The zero-day row is the one worth pausing on. A signature-based IDS can never detect one.
+A world model does not need to: it forecasts from the *trajectory*, and initial access by
+an unknown exploit still produces lateral movement that looks like lateral movement.
+
 ## How it works
 
 Five stages, described in full in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
@@ -139,9 +158,9 @@ Five stages, described in full in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 2. **Dual-level features** — NetFlow-style aggregates *plus* packet-level statistics
    (TTL variance, window trace, payload distribution, retransmissions, duplicate ACKs,
    fragmentation) that only a full capture can supply.
-3. **State windowing** — 30-second windows become 96-dimensional state vectors: volume and
-   shape, distributional aggregates, and behavioural detectors such as ports-swept-per-pair
-   and beacon regularity that only exist once traffic is grouped in time.
+3. **State windowing** — 30-second windows become 103-dimensional state vectors: volume and
+   shape, distributional aggregates, and behavioural detectors such as ports-swept-per-pair,
+   beacon regularity and worm fan-out that only exist once traffic is grouped in time.
 4. **World model** — a temporal transformer learns the state *change*, plus MITRE stage and
    infiltration heads, then forward-simulates K steps autoregressively.
 5. **Explain** — grouped KernelSHAP for *what*, attention (or occlusion) for *when*, plus
@@ -171,8 +190,8 @@ atdrps/
   engine/             end-to-end inference
 app/                  offline Flask dashboard
 configs/              YAML configuration
-docs/                 architecture, benchmarks, plan, slides, demo script
-tests/                215 tests, standard library only
+docs/                 architecture, attack coverage, benchmarks, slides, demo script
+tests/                234 tests, standard library only
 ```
 
 ## Testing

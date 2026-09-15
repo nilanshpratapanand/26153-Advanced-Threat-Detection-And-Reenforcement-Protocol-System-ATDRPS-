@@ -49,7 +49,7 @@ flow CSV      ──┘   (in-tree)       (5-tuple,          (flow + packet)    
 
 ## 3. State representation
 
-Each 30-second window becomes a **96-dimensional vector** with three kinds of component.
+Each 30-second window becomes a **103-dimensional vector** with three kinds of component.
 
 **Volume and shape (22)** — flow/packet/byte counts, rates, distinct sources,
 destinations and ports, protocol mix, internal/external/inbound shares, outbound byte
@@ -59,10 +59,14 @@ ratio, top-talker concentration.
 features across the window. The *spread* carries as much signal as the mean: a window of
 beacons has a very small `iat_std`, and that is the whole tell.
 
-**Behavioural detectors (14)** — structure that no single flow contains: ports swept per
+**Behavioural detectors (21)** — structure that no single flow contains: ports swept per
 source–destination pair, repeated connections to one service, sequential-port ratio,
 admin/auth service share, internal peers reached by one host, **beacon regularity**,
-repeat external destinations, proportion of never-before-seen destinations, graph degree.
+repeat external destinations, proportion of never-before-seen destinations, graph degree —
+plus seven built for specific attack families: same-port fan-out (worms), half-open ratio
+(denial of service), sources converging on one service (credential stuffing, DDoS), DNS
+share and DNS query size (tunnelling), TTL inconsistency and RST injection (machine-in-the-
+middle). See `docs/ATTACK_COVERAGE.md`.
 
 Per-flow features are dual-level by construction: NetFlow-style aggregates (durations,
 byte/packet counts, TCP flag counts and ratios, IAT statistics) **plus** packet-level
@@ -71,12 +75,16 @@ distribution, retransmissions, duplicate ACKs, out-of-order segments, fragmentat
 
 Measured separation on generated traffic:
 
-| feature | benign | attack stage |
+| feature | benign | attack |
 |---|---|---|
-| `max_ports_per_src_dst` | 1.3 | 22.8 (Reconnaissance) |
-| `admin_service_share` | 0.00 | 0.36 (Initial Access) |
-| `beacon_regularity` | 0.66 | 0.92 (Command & Control) |
-| `outbound_bytes_ratio` | 0.01 | 0.52 (Exfiltration) |
+| `max_ports_per_src_dst` | 1.3 | 22.8 (port scan) |
+| `admin_service_share` | 0.00 | 0.36 (brute force) |
+| `beacon_regularity` | 0.66 | 0.92 (C2 beacon) |
+| `outbound_bytes_ratio` | 0.01 | 0.52 (exfiltration) |
+| `same_port_fanout` (log) | 0.79 | 1.89 (worm) |
+| `half_open_ratio` | 0.00 | 0.80 (SYN flood) |
+| `dns_query_size` (log) | 4.29 | 5.39 (DNS tunnelling) |
+| `ttl_inconsistency` | 0.001 | 0.104 (machine-in-the-middle) |
 
 ## 4. The world model
 
@@ -89,7 +97,11 @@ self-attention, and three heads on the final position.
   instead pulls a regularised model toward the *mean* state, and a rollout that feeds
   mean states back into its own context oscillates within a few steps. This was observed
   and fixed, not assumed.
-* **Stage head** — MITRE ATT&CK stage of the **next** window.
+* **Stage head** — MITRE ATT&CK stage of the **next** window. Six stages: the five the
+  problem statement names, plus **Impact** (TA0040) for denial of service and ransomware
+  encryption, which are real, are in every dataset, and are not steps toward infiltration.
+  Forcing a SYN flood onto "Reconnaissance" because both send many SYNs would corrupt the
+  transition dynamics the model exists to learn.
 * **Infiltration head** — binary probability for the next window.
 
 Training all three together is the point. The stage head alone is a classifier with extra
@@ -134,15 +146,20 @@ validation, applied unchanged to test.
 
 | model | F1 | Precision | Recall | FPR | Stage acc. |
 |---|---|---|---|---|---|
-| logistic regression (static) | 0.9023 | 0.8757 | 0.9305 | 0.1589 | 0.7618 |
-| logistic regression (context) | 0.9375 | 0.9117 | 0.9647 | 0.1123 | 0.8209 |
-| **ATDRPS world model** | **0.9562** | **0.9425** | **0.9704** | **0.0712** | **0.8514** |
+| logistic regression (static) | 0.8376 | 0.8417 | 0.8335 | 0.1660 | 0.7556 |
+| logistic regression (context) | 0.8947 | 0.9128 | 0.8773 | 0.0888 | 0.8013 |
+| **ATDRPS world model** | **0.9214** | **0.9317** | **0.9113** | **0.0708** | **0.8400** |
 
-The world model wins at **every** horizon step and the margin widens with distance
-(step 5: F1 0.905 vs 0.868, FPR 0.183 vs 0.233) — precisely what a static classifier
-cannot do.
+The world model wins at **every** horizon step (step 5: F1 0.842 vs 0.811) and less than
+half the false-positive rate of the static classifier — precisely what a snapshot
+classifier cannot do.
 
-**Dynamics check.** Next-state error 0.868 against the persistence floor of 1.520. A model
+Per stage, one window ahead: Command & Control 0.848, Exfiltration 0.859, Benign 0.896,
+Reconnaissance 0.798, Initial Access 0.790, Lateral Movement 0.784, **Impact 0.500**. The
+last is the weak one, on 32 test windows — too rare in this corpus to learn well, and
+reported rather than hidden.
+
+**Dynamics check.** Next-state error 0.611 against the persistence floor of 1.006. A model
 that beats a baseline on stage F1 but cannot beat "assume nothing changes" has learned a
 classifier, not dynamics; this one clears the floor.
 
