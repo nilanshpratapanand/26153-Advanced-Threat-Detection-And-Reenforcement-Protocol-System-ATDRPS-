@@ -85,7 +85,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python tests/run_tests.py          # 234 tests, standard library only (no pytest)
+python tests/run_tests.py          # 242 tests, standard library only (no pytest)
 ```
 
 PyTorch is needed only for the temporal transformer backend; everything else — ingestion,
@@ -109,10 +109,12 @@ python -m atdrps.cli corpus --captures 48 --out data/corpus.npz
 python -m atdrps.cli benchmark --corpus data/corpus.npz --split group
 
 # 4. forecast from a capture, with explanations
-python -m atdrps.cli predict data/demo/capture.pcap --model artifacts/model-transformer
+#    (defaults to artifacts/model-linear; add --model artifacts/model-transformer
+#    only if you installed PyTorch and trained it in step 3)
+python -m atdrps.cli predict data/demo/capture.pcap
 
 # 5. the offline dashboard
-python -m atdrps.cli serve --model artifacts/model-transformer
+python -m atdrps.cli serve
 #    -> http://127.0.0.1:8501
 ```
 
@@ -120,11 +122,10 @@ python -m atdrps.cli serve --model artifacts/model-transformer
 
 ```bash
 # CIC-IDS2018 / CIC-IDS2017 / UNSW-NB15 / CTU-13 flow CSVs are auto-detected
-python -m atdrps.cli predict Thursday-15-02-2018_TrafficForML_CICFlowMeter.csv \
-    --model artifacts/model-transformer
+python -m atdrps.cli predict Thursday-15-02-2018_TrafficForML_CICFlowMeter.csv
 
 # raw PCAP is parsed in-tree -- no CICFlowMeter, no scapy
-python -m atdrps.cli predict capture.pcap --model artifacts/model-transformer
+python -m atdrps.cli predict capture.pcap
 ```
 
 A CSV-only run is reported as a **flow-level** run. Published CSVs are NetFlow-style
@@ -178,7 +179,7 @@ atdrps/
     synth.py          labelled synthetic attack-chain generator
     flows.py          5-tuple assembly and dual-level feature extraction
     datasets.py       CIC-IDS2018 / 2017, UNSW-NB15, CTU-13 adapters
-    windows.py        time windowing -> 96-dim network states
+    windows.py        time windowing -> 103-dim network states
     mitre.py          ATT&CK stage mapping and the interpretable rule engine
   models/
     base.py           the WorldModel interface and the shared K-step rollout
@@ -188,10 +189,12 @@ atdrps/
   train/              sequences, splits, training loops, metrics, benchmark
   explain/            KernelSHAP, attribution, plain-English glossary
   engine/             end-to-end inference
+  live/               stdlib packet capture, port scan, live inference session (bonus,
+                       beyond the PS's PCAP/CSV input requirement -- see below)
 app/                  offline Flask dashboard
 configs/              YAML configuration
 docs/                 architecture, attack coverage, benchmarks, slides, demo script
-tests/                234 tests, standard library only
+tests/                242 tests, standard library only
 ```
 
 ## Testing

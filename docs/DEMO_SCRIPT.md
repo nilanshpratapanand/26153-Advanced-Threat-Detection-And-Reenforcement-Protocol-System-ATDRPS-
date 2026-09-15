@@ -24,13 +24,13 @@ But infiltration isn't a packet. It's a process. So ATDRPS asks a different ques
 
 > *Run:*
 > ```
-> python -m atdrps.cli predict data/demo/capture.pcap --model artifacts/model-transformer
+> python -m atdrps.cli predict data/demo/capture.pcap
 > ```
 > *Let the header scroll.*
 
-"This is a raw packet capture — eighty thousand packets. No CICFlowMeter, no scapy: ATDRPS
-parses pcap itself, assembles two thousand flows, and turns every thirty seconds of traffic
-into a ninety-six dimensional network **state**.
+"This is a raw packet capture — nearly ninety thousand packets. No CICFlowMeter, no scapy:
+ATDRPS parses pcap itself, assembles over four thousand flows, and turns every thirty
+seconds of traffic into a hundred-and-three dimensional network **state**.
 
 Flow-level features and packet-level features together — because a slow port scan sits
 under every flow threshold. What gives it away is a constant TTL, a tiny fixed window, and
@@ -43,10 +43,10 @@ a walk across ports. Aggregate that into a NetFlow record and the evidence is go
 > *The risk timeline prints. Point at the alert block.*
 
 "For every window, the model forecasts one step ahead. And here's the capture's story,
-recovered in order: reconnaissance — initial access — lateral movement.
+recovered in order: reconnaissance — lateral movement — command and control — exfiltration.
 
-The model never saw this capture, or anything from this campaign. Eighty percent exact
-stage match against ground truth, at a false-positive rate of point one one nine.
+The model has never seen this capture, or anything from this campaign. Eighty-four percent
+exact stage match against ground truth, at a false-positive rate of point zero seven.
 
 And it caught the *slow* scan — the one that looks like nothing, flow by flow."
 
@@ -81,8 +81,9 @@ deploys inside critical infrastructure."
 
 > *Cut to `docs/BENCHMARKS.md` on screen.*
 
-"Against logistic regression on identical features and identical splits: F1 point nine
-five six against point nine three eight, and the false-positive rate roughly halved.
+"Against logistic regression on identical features and identical splits: F1 point nine two
+one against point eight nine five, and the false-positive rate roughly halved — point zero
+seven against point zero nine.
 
 More importantly, the margin **widens** the further ahead we forecast. A static classifier
 has nothing to extrapolate from. A learned transition model does.
@@ -93,8 +94,8 @@ That's ATDRPS."
 
 ## Recording checklist
 
-- [ ] `python -m atdrps.cli benchmark --corpus data/corpus.npz` run beforehand so
-      `artifacts/model-transformer` exists
+- [ ] `artifacts/model-linear/` already present in the repo (the trained model the CLI
+      and dashboard use by default) — no setup step needed before recording
 - [ ] Terminal font large enough to read at 1080p (16pt+), dark theme
 - [ ] Browser zoomed so the whole dashboard fits without scrolling mid-sentence
 - [ ] Disconnect the network before recording and say so — it is the most persuasive
