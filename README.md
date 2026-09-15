@@ -43,19 +43,19 @@ thresholds are chosen on the validation split and applied unchanged to test.
 
 | model | F1 | Precision | Recall | **FPR** | Stage acc. |
 |---|---|---|---|---|---|
-| logistic regression (static — the classifier the PS criticises) | 0.8376 | 0.8417 | 0.8335 | 0.1660 | 0.7556 |
-| logistic regression (full context — a strong baseline) | 0.8947 | 0.9128 | 0.8773 | 0.0888 | 0.8013 |
-| **ATDRPS world model** | **0.9214** | **0.9317** | **0.9113** | **0.0708** | **0.8400** |
+| logistic regression (static — the classifier the PS criticises) | 0.8477 | 0.8275 | 0.8688 | 0.1918 | 0.7619 |
+| logistic regression (full context — a strong baseline) | 0.8946 | 0.9075 | 0.8821 | 0.0952 | 0.7956 |
+| **ATDRPS world model** | **0.9294** | **0.9306** | **0.9283** | **0.0734** | **0.8400** |
 
-The world model wins at **every** horizon step (step 5: F1 0.842 vs 0.811, FPR 0.242 vs
-0.266), and it more than halves the false-positive rate of the static classifier the
+The world model wins at **every** horizon step (step 5: F1 0.844 vs 0.815, FPR 0.236 vs
+0.248), and it more than halves the false-positive rate of the static classifier the
 problem statement criticises. At the class level it is strongest where it matters —
-Command & Control F1 0.848, Exfiltration 0.859 — and weakest on `Impact`, F1 0.500 on 32
+Command & Control F1 0.848, Exfiltration 0.858 — and weakest on `Impact`, F1 0.491 on 32
 test windows, which is simply too rare a class in this corpus to learn well. That is
 reported rather than hidden.
 
 **Does it actually model dynamics?** Next-state error **0.611** against a persistence
-floor of **1.006**. A model that beats a baseline on classification but cannot beat
+floor of **1.007**. A model that beats a baseline on classification but cannot beat
 "assume nothing changes" has learned a classifier, not a world model. This one clears the
 floor.
 
@@ -85,7 +85,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python tests/run_tests.py          # 242 tests, standard library only (no pytest)
+python tests/run_tests.py          # 273 tests, standard library only (no pytest)
 ```
 
 PyTorch is needed only for the temporal transformer backend; everything else — ingestion,
@@ -194,7 +194,7 @@ atdrps/
 app/                  offline Flask dashboard
 configs/              YAML configuration
 docs/                 architecture, attack coverage, benchmarks, slides, demo script
-tests/                242 tests, standard library only
+tests/                273 tests, standard library only
 ```
 
 ## Testing

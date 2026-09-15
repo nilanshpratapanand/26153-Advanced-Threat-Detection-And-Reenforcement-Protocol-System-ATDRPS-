@@ -72,7 +72,8 @@ def cmd_corpus(args) -> int:
     from make_corpus import build, save  # noqa: E402
 
     captures = build(args.captures, args.duration, args.campaigns, args.window,
-                     args.intensity, args.seed, args.history)
+                     args.intensity, args.seed, args.history,
+                     workers=getattr(args, 'workers', None))
     save(Path(args.out), captures)
     total = sum(len(c) for c in captures)
     print(f"{total} windows across {len(captures)} captures -> {args.out}")
@@ -256,6 +257,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--history", type=float, default=600.0)
     p.add_argument("--seed", type=int, default=1000)
     p.add_argument("--out", default="data/corpus.npz")
+    p.add_argument("--workers", type=int, default=None,
+                   help="parallel capture builders (default: all cores, capped at 16)")
     p.set_defaults(func=cmd_corpus)
 
     p = sub.add_parser("train", help="train a world model")

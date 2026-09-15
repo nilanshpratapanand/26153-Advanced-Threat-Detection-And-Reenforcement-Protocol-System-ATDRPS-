@@ -29,23 +29,54 @@ from atdrps.data.synth import generate_capture                    # noqa: E402
 from atdrps.data.windows import build_windows                     # noqa: E402
 
 
+def _build_one(spec: tuple):
+    """Generate, assemble and window exactly one capture.
+
+    Module level and taking a plain tuple so ProcessPoolExecutor can pickle it.
+    Each capture is driven by its own seed and touches no shared state, so the
+    corpus is identical however many workers build it -- the seed, not the
+    arrival order, decides the contents.
+    """
+    seed, duration_s, campaigns, intensity, window_s, history_s = spec
+    cap = generate_capture(seed=seed, duration_s=duration_s, n_campaigns=campaigns,
+                           background_intensity=intensity)
+    flows = assemble_flows(PacketTable.from_records(cap.packets))
+    states = build_windows(flows, window_size_s=window_s,
+                           stage_timeline=cap.stage_at, history_s=history_s)
+    return states, len(cap.packets), len(flows)
+
+
 def build(captures: int, duration_s: float, campaigns: int, window_s: float,
-          intensity: float, seed0: int, history_s: float, verbose: bool = True):
+          intensity: float, seed0: int, history_s: float, verbose: bool = True,
+          workers: int | None = None):
+    """Build the corpus, one capture per seed, across all available cores.
+
+    Corpus generation is the slowest part of a training run and every capture
+    is independent, so it parallelises perfectly -- this is what keeps the CPU
+    busy while the GPU is idle waiting for data to train on.
+    """
+    from atdrps.engine.pool import PoolConfig, default_workers, map_chunks
+
+    specs = [(seed0 + i, duration_s, campaigns, intensity, window_s, history_s)
+             for i in range(captures)]
+    n_workers = workers if workers is not None else default_workers(cap=16)
+    cfg = PoolConfig(workers=n_workers, backend="process", min_units=2)
+
+    t0 = time.time()
+    if verbose:
+        print(f"  building {captures} captures on {min(n_workers, captures)} worker(s)",
+              flush=True)
+    results = map_chunks(_build_one, specs, cfg, work_size=captures)
+
     out = []
-    for i in range(captures):
-        t0 = time.time()
-        cap = generate_capture(
-            seed=seed0 + i, duration_s=duration_s, n_campaigns=campaigns,
-            background_intensity=intensity,
-        )
-        flows = assemble_flows(PacketTable.from_records(cap.packets))
-        states = build_windows(flows, window_size_s=window_s,
-                               stage_timeline=cap.stage_at, history_s=history_s)
+    for i, (states, n_packets, n_flows) in enumerate(results):
         out.append(states)
         if verbose:
             print(f"  [{i + 1}/{captures}] seed={seed0 + i} "
-                  f"{len(cap.packets):>7} packets -> {len(flows):>5} flows -> "
-                  f"{len(states):>4} windows  ({time.time() - t0:.1f}s)", flush=True)
+                  f"{n_packets:>7} packets -> {n_flows:>5} flows -> "
+                  f"{len(states):>4} windows", flush=True)
+    if verbose:
+        print(f"  corpus built in {time.time() - t0:.1f}s", flush=True)
     return out
 
 

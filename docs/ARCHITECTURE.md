@@ -100,16 +100,16 @@ validation, applied unchanged to test.
 
 | model | F1 | Precision | Recall | FPR | Stage acc. |
 |---|---|---|---|---|---|
-| logistic regression (static) | 0.8376 | 0.8417 | 0.8335 | 0.1660 | 0.7556 |
-| logistic regression (context) | 0.8947 | 0.9128 | 0.8773 | 0.0888 | 0.8013 |
-| **ATDRPS world model** | **0.9214** | **0.9317** | **0.9113** | **0.0708** | **0.8400** |
+| logistic regression (static) | 0.8477 | 0.8275 | 0.8688 | 0.1918 | 0.7619 |
+| logistic regression (context) | 0.8946 | 0.9075 | 0.8821 | 0.0952 | 0.7956 |
+| **ATDRPS world model** | **0.9294** | **0.9306** | **0.9283** | **0.0734** | **0.8400** |
 
-Wins at **every** horizon step (step 5: F1 0.842 vs 0.811) at less than half the
-false-positive rate of the static classifier. Weakest on **Impact** (F1 0.500, 32 test
+Wins at **every** horizon step (step 5: F1 0.844 vs 0.815) at less than half the
+false-positive rate of the static classifier. Weakest on **Impact** (F1 0.491, 32 test
 windows — too rare in this corpus to learn well, reported rather than hidden). Full
 per-stage and per-horizon breakdown in `docs/BENCHMARKS.md`.
 
-**Dynamics check.** Next-state error 0.611 against the persistence floor of 1.006 — a
+**Dynamics check.** Next-state error 0.611 against the persistence floor of 1.007 — a
 model that beats a baseline on stage F1 but cannot beat "assume nothing changes" has
 learned a classifier, not dynamics; this one clears the floor.
 
