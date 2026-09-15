@@ -77,7 +77,18 @@ DETECTOR_FEATURES: tuple[str, ...] = (
     "distinct_internal_dsts", "beacon_regularity", "log_beacon_flow_count",
     "repeat_external_dst_count", "new_dst_ratio", "new_dst_port_ratio",
     "graph_mean_degree", "graph_max_degree",
+    # --- added to carry attack families the first fourteen could not separate;
+    #     see docs/ATTACK_COVERAGE.md for which attack each one is for
+    "log_same_port_fanout",      # worm: one source, many hosts, one port
+    "half_open_ratio",           # DoS / scanning: handshakes that never complete
+    "log_max_srcs_per_dst_service",  # credential stuffing, DDoS: many -> one
+    "dns_share",                 # DNS tunnelling / spoofing
+    "log_dns_query_size",        # tunnelling: data rides in long encoded subdomains
+    "ttl_inconsistency",         # MitM: one source arriving with several TTLs
+    "rst_injection_ratio",       # MitM: RSTs injected mid-session
 )
+
+DNS_PORTS = frozenset((53, 5353, 853))
 
 AUTH_PORTS = frozenset((21, 22, 23, 3389, 445, 1433, 3306, 5432, 5900))
 ADMIN_PORTS = frozenset((135, 139, 445, 3389, 22, 5985, 5986))
@@ -271,6 +282,12 @@ def build_windows(
     tot_bytes = flows["total_bytes"].to_numpy(dtype=float)
     tot_packets = flows["total_packets"].to_numpy(dtype=float)
     agg_source = {f: flows[f].to_numpy(dtype=float) for f in AGGREGATED_FLOW_FEATURES}
+    # extra per-flow columns the detectors need but the aggregates do not carry
+    det_source = {
+        name: (flows[name].to_numpy(dtype=float) if name in flows.columns
+               else np.zeros(len(flows), dtype=float))
+        for name in ("syn_count", "ack_count", "rst_count", "fwd_ttl_mean")
+    }
 
     src_internal = np.array([is_internal(a) for a in src], dtype=bool)
     dst_internal = np.array([is_internal(a) for a in dst], dtype=bool)
@@ -302,7 +319,7 @@ def build_windows(
         summary = _window_summary(
             idx, hist_idx, window_size_s, src, dst, sport, dport, proto,
             fwd_bytes, bwd_bytes, tot_bytes, tot_packets,
-            src_internal, dst_internal, agg_source,
+            src_internal, dst_internal, agg_source, det_source,
             seen_dsts, seen_dst_ports, start_ts,
         )
         summaries.append(summary)
@@ -375,7 +392,7 @@ def _window_stage(idx, w_start, w_end, stage_timeline, flow_stage):
 def _window_summary(
     idx, hist_idx, window_size_s, src, dst, sport, dport, proto,
     fwd_bytes, bwd_bytes, tot_bytes, tot_packets,
-    src_internal, dst_internal, agg_source,
+    src_internal, dst_internal, agg_source, det_source,
     seen_dsts, seen_dst_ports, start_ts,
 ) -> dict:
     n = int(idx.size)
@@ -502,6 +519,53 @@ def _window_summary(
     vec["graph_mean_degree"] = float(degree.mean())
     vec["graph_max_degree"] = float(degree.max())
 
+    # ---------------------------------------------- attack-family detectors
+    # Worm: the signature is fan-out on a *fixed* port. A scan is one source
+    # touching many ports on one host; a worm is one source touching many hosts
+    # on one port. Without this they look alike in aggregate.
+    fanout = pair.assign(dport=w_dport).groupby(["src", "dport"])["dst"].nunique()
+    same_port_fanout = float(fanout.max()) if len(fanout) else 0.0
+    vec["log_same_port_fanout"] = float(np.log1p(same_port_fanout))
+
+    # Denial of service and scanning both leave handshakes unfinished.
+    syn = det_source["syn_count"][idx]
+    ack = det_source["ack_count"][idx]
+    vec["half_open_ratio"] = _safe_div(np.count_nonzero((syn > 0) & (ack == 0)), n)
+
+    # Credential stuffing and DDoS both converge many sources on one service;
+    # a per-source rate limit sees nothing, the window-level view does.
+    srcs_per_service = pd.DataFrame(
+        {"dst": w_dst, "dport": w_dport, "src": w_src}
+    ).groupby(["dst", "dport"])["src"].nunique()
+    max_srcs = float(srcs_per_service.max()) if len(srcs_per_service) else 0.0
+    vec["log_max_srcs_per_dst_service"] = float(np.log1p(max_srcs))
+
+    # DNS tunnelling. The response/query size *ratio* does not work: ordinary
+    # lookups already return far more than they ask (a 40-byte query, a 300-byte
+    # answer), and a tunnel's ratio is if anything lower. What separates them is
+    # the query itself -- encoded data rides in long subdomains, so a tunnelled
+    # query is several times the size of a real one.
+    is_dns = np.isin(w_dport, list(DNS_PORTS)) | np.isin(w_sport, list(DNS_PORTS))
+    vec["dns_share"] = _safe_div(np.count_nonzero(is_dns), n)
+    if np.any(is_dns):
+        vec["log_dns_query_size"] = float(np.log1p(np.mean(w_fwd[is_dns])))
+
+    # MitM: the spoofing is below IP, but a source suddenly arriving with
+    # several different TTLs is the consequence, and that is in the header.
+    # Expressed as the *fraction of sources* that are inconsistent, because a
+    # raw count grows with traffic volume and would just re-measure busyness.
+    ttl = np.round(det_source["fwd_ttl_mean"][idx])
+    if n > 1:
+        per_src = pd.DataFrame({"src": w_src, "ttl": ttl}).groupby("src")["ttl"].nunique()
+        vec["ttl_inconsistency"] = float((per_src > 1).mean()) if len(per_src) else 0.0
+
+    # An RST on a conversation that was already flowing is injection; an RST on
+    # a short exchange is a refused connection. The threshold has to clear a
+    # failed authentication attempt -- handshake, request, reply, reset is six
+    # packets -- or every brute-force window scores as machine-in-the-middle.
+    rst = det_source["rst_count"][idx]
+    vec["rst_injection_ratio"] = _safe_div(np.count_nonzero((rst > 0) & (w_pkts > 12)), n)
+
     # ------------- plain-language summary used by the rule engine and the UI
     summary.update({
         "n_flows": float(n),
@@ -523,6 +587,13 @@ def _window_summary(
         "repeat_external_dst_count": vec["repeat_external_dst_count"],
         "outbound_bytes_ratio": vec["outbound_bytes_ratio"],
         "mean_payload_mean": vec["payload_mean__mean"],
+        "same_port_fanout": same_port_fanout,
+        "half_open_ratio": vec["half_open_ratio"],
+        "max_srcs_per_dst_service": max_srcs,
+        "dns_share": vec["dns_share"],
+        "dns_query_size": float(np.mean(w_fwd[is_dns])) if np.any(is_dns) else 0.0,
+        "ttl_inconsistency": vec["ttl_inconsistency"],
+        "rst_injection_ratio": vec["rst_injection_ratio"],
     })
     summary["_vector"] = vec
     return summary

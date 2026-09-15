@@ -27,13 +27,38 @@ class TestLabelMapping(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertEqual(stage_from_label(label), expected)
 
-    def test_denial_of_service_is_not_forced_into_the_chain(self):
-        """DoS is Impact (TA0040). Calling it Reconnaissance would corrupt the
+    def test_denial_of_service_maps_to_impact_not_to_the_chain(self):
+        """DoS is Impact (TA0040), not a step toward infiltration. Calling it
+        Reconnaissance -- both send a lot of SYNs -- would corrupt the
         transition dynamics the model exists to learn."""
+        chain = {"Reconnaissance", "InitialAccess", "LateralMovement",
+                 "CommandAndControl", "Exfiltration"}
         for label in ("DoS attacks-Hulk", "DDoS attacks-LOIC-HTTP", "DDOS",
-                      "DoS Slowloris", "DoS GoldenEye"):
+                      "DoS Slowloris", "DoS GoldenEye", "SYN flood"):
             with self.subTest(label=label):
-                self.assertEqual(stage_from_label(label), OUT_OF_SCOPE)
+                stage = stage_from_label(label)
+                self.assertEqual(stage, "Impact")
+                self.assertNotIn(stage, chain)
+
+    def test_new_attack_families_from_the_taxonomy(self):
+        """Every family in the team's attack document resolves somewhere
+        deliberate -- see docs/ATTACK_COVERAGE.md."""
+        cases = {
+            "WannaCry ransomware": "Impact",
+            "Conficker worm": "LateralMovement",
+            "EternalBlue SMB exploit": "LateralMovement",
+            "DNS tunnel (iodine)": "Exfiltration",
+            "dnscat2": "Exfiltration",
+            "credential stuffing": "InitialAccess",
+            "password spraying": "InitialAccess",
+            "ARP spoofing": "Reconnaissance",
+            "DNS cache poisoning": "Reconnaissance",
+            "keylogger": "CommandAndControl",
+            "remote access trojan": "CommandAndControl",
+        }
+        for label, expected in cases.items():
+            with self.subTest(label=label):
+                self.assertEqual(stage_from_label(label), expected)
 
     def test_unknown_label_is_out_of_scope_not_a_guess(self):
         self.assertEqual(stage_from_label("some-new-2027-attack"), OUT_OF_SCOPE)
@@ -50,7 +75,13 @@ class TestLabelMapping(unittest.TestCase):
     def test_descriptions_cite_attack(self):
         self.assertIn("TA0010", describe_stage("Exfiltration"))
         self.assertIn("T1041", describe_stage("Exfiltration"))
-        self.assertIn("TA0040", describe_stage(OUT_OF_SCOPE))
+        self.assertIn("TA0040", describe_stage("Impact"))
+        self.assertIn("T1486", describe_stage("Impact"))
+
+    def test_out_of_scope_description_does_not_claim_a_tactic(self):
+        text = describe_stage(OUT_OF_SCOPE)
+        self.assertIn("Out of scope", text)
+        self.assertNotIn("TA00", text)
 
 
 class TestRuleEngine(unittest.TestCase):

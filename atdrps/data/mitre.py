@@ -16,14 +16,20 @@ Two jobs:
 An honest scope note
 --------------------
 The problem statement names five stages: Reconnaissance, Initial Access,
-Lateral Movement, Command & Control, Exfiltration.  Real datasets also contain
-attack families that are *not* any of those -- denial of service is Impact
-(TA0040), not a step on the path to infiltration.  Those map to
-:data:`OUT_OF_SCOPE` rather than being forced into the nearest of the five.
-Windows dominated by them are excluded from the stage loss by a mask instead of
-being mislabelled, because training a forecaster to call a SYN flood
-"Reconnaissance" would corrupt exactly the transition dynamics we are trying to
-learn.
+Lateral Movement, Command & Control, Exfiltration.  Real captures also contain
+denial of service and ransomware encryption, which are ATT&CK **Impact**
+(TA0040) and are not steps on the path to infiltration.  Those get their own
+stage rather than being forced onto the nearest of the five -- a SYN flood is
+not reconnaissance, however many SYNs it sends, and training a forecaster to
+believe otherwise would corrupt exactly the transition dynamics we are trying
+to learn.
+
+:data:`OUT_OF_SCOPE` remains for what genuinely does not belong in a
+traffic-based kill chain, and for unrecognised labels.  Windows dominated by
+those are excluded from the stage loss by a mask rather than mislabelled.
+
+See ``docs/ATTACK_COVERAGE.md`` for the full attack-by-attack breakdown of what
+is visible in network traffic and what is not.
 """
 
 from __future__ import annotations
@@ -48,7 +54,8 @@ MITRE_TACTICS: dict[str, str] = {
     "LateralMovement": "TA0008",
     "CommandAndControl": "TA0011",
     "Exfiltration": "TA0010",
-    OUT_OF_SCOPE: "TA0040",          # Impact -- named, but outside the five
+    "Impact": "TA0040",
+    OUT_OF_SCOPE: "-",
     BENIGN_STAGE: "-",
 }
 
@@ -77,6 +84,11 @@ STAGE_TECHNIQUES: dict[str, tuple[tuple[str, str], ...]] = {
         ("T1048", "Exfiltration Over Alternative Protocol"),
         ("T1030", "Data Transfer Size Limits"),
     ),
+    "Impact": (
+        ("T1486", "Data Encrypted for Impact"),
+        ("T1498", "Network Denial of Service"),
+        ("T1499", "Endpoint Denial of Service"),
+    ),
 }
 
 # Dataset attack-family names -> stage.  Ordered: the first pattern that matches
@@ -87,21 +99,34 @@ LABEL_PATTERNS: tuple[tuple[str, str], ...] = (
     # --- reconnaissance
     (r"portscan|port scan|port-scan|reconnaissance|^scan|probe|analysis|heartbleed", "Reconnaissance"),
     (r"nmap|ipsweep|portsweep|satan|mscan|saint", "Reconnaissance"),
+    (r"mitm|man.?in.?the.?middle|arp.?spoof|arp.?poison|dns.?spoof|cache.?poison",
+     "Reconnaissance"),
+    # --- self-propagating SMB exploits: these must be matched BEFORE the
+    #     generic "exploit" pattern below, or EternalBlue resolves to initial
+    #     access. First match wins, so specific goes first.
+    (r"worm|conficker|sasser|blaster|wannacry.?spread|eternalblue|smb.?exploit",
+     "LateralMovement"),
     # --- initial access
     (r"brute ?-?force|bruteforce|patator|password|guess", "InitialAccess"),
+    (r"credential.?stuff|cred.?stuff|account.?takeover|password.?spray", "InitialAccess"),
     (r"web attack|xss|sql ?injection|sqli|infilt|exploit|shellcode|backdoor(?!.*c2)", "InitialAccess"),
     (r"^r2l$|warezclient|warezmaster|imap|multihop|phf|spy", "InitialAccess"),
-    # --- lateral movement
+    # --- lateral movement (worms propagate laterally by definition)
     (r"lateral|^u2r$|rootkit|buffer_overflow|loadmodule|perl|smb|psexec", "LateralMovement"),
     # --- command and control
     (r"\bbot\b|botnet|^bot$|c&?c|command.?and.?control|beacon|irc|mirai|zeus|neris|rbot|virut",
      "CommandAndControl"),
+    (r"spyware|keylog|rat\b|remote.?access.?tro", "CommandAndControl"),
     (r"trojan|worm(?!.*dos)", "CommandAndControl"),
-    # --- exfiltration
+    # --- exfiltration (DNS tunnelling is exfiltration over an alternative protocol)
     (r"exfil|data ?theft|data ?leak", "Exfiltration"),
-    # --- explicitly outside the five-stage chain
-    (r"ddos|dos ?attack|^dos|goldeneye|slowloris|slowhttptest|hulk|\bloic\b|\bhoic\b", OUT_OF_SCOPE),
-    (r"flood|fuzzers|generic|^apache", OUT_OF_SCOPE),
+    (r"dns.?tunnel|tunnel|iodine|dnscat|covert.?channel", "Exfiltration"),
+    # --- Impact (TA0040): real attacks, but not steps toward infiltration
+    (r"ransom|wannacry|locky|cryptolocker|encrypt.?for.?impact|wiper", "Impact"),
+    (r"ddos|dos ?attack|^dos|goldeneye|slowloris|slowhttptest|hulk|\bloic\b|\bhoic\b", "Impact"),
+    (r"flood|syn.?flood|udp.?lag|^apache", "Impact"),
+    # --- genuinely outside a traffic-based kill chain
+    (r"fuzzers|generic|analysis|shellcode\b(?!.*access)", OUT_OF_SCOPE),
 )
 
 _COMPILED = tuple((re.compile(pattern, re.IGNORECASE), stage) for pattern, stage in LABEL_PATTERNS)
@@ -129,7 +154,8 @@ def describe_stage(stage: str) -> str:
     if stage == BENIGN_STAGE:
         return "Benign - no attack behaviour indicated"
     if stage == OUT_OF_SCOPE:
-        return f"Out of chain scope ({tactic} Impact) - not a step toward infiltration"
+        return ("Out of scope - not observable as a kill-chain stage in network "
+                "traffic (see docs/ATTACK_COVERAGE.md)")
     techniques = ", ".join(f"{tid} {name}" for tid, name in STAGE_TECHNIQUES.get(stage, ()))
     return f"{stage} ({tactic}) - {techniques}"
 
@@ -169,6 +195,12 @@ RULES: tuple[tuple[str, str, str, float, float, str], ...] = (
     ("Exfiltration", "total_bytes", ">", 2_000_000, 1.3, "bulk volume moved in a single window"),
     ("Exfiltration", "mean_payload_mean", ">", 800, 0.9, "packets are consistently near MTU"),
     ("Exfiltration", "external_flow_share", ">", 0.4, 0.6, "destination is outside the network"),
+
+    # ---- Impact: volumetric denial of service, or mass encryption over SMB
+    ("Impact", "half_open_ratio", ">", 0.5, 1.6, "most connections never complete a handshake"),
+    ("Impact", "max_srcs_per_dst_service", ">", 8, 1.4, "many sources converging on one service"),
+    ("Impact", "n_flows", ">", 400, 1.0, "an extreme number of conversations in one window"),
+    ("Impact", "mean_flow_packets", "<", 5, 0.6, "conversations end almost immediately"),
 )
 
 

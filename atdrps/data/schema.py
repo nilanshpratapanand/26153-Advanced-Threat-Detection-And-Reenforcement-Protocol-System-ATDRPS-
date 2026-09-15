@@ -336,6 +336,9 @@ FLOW_FEATURES: tuple[str, ...] = (
 # flow-level threshold.
 PACKET_FEATURES: tuple[str, ...] = (
     "ttl_mean", "ttl_std", "ttl_min", "ttl_max", "ttl_unique",
+    # forward direction only: a flow's overall TTL mixes both endpoints, so it
+    # cannot answer "did this source's TTL change", which is the MitM question
+    "fwd_ttl_mean",
     "window_mean", "window_std", "window_min", "window_max",
     "window_zero_count",
     "payload_mean", "payload_std", "payload_min", "payload_max",
@@ -348,6 +351,13 @@ PACKET_FEATURES: tuple[str, ...] = (
 
 
 # ------------------------------------------------------------- MITRE stages
+# The problem statement names five stages. "Impact" is added as a sixth
+# because real captures contain denial of service and ransomware encryption,
+# which are ATT&CK Impact (TA0040) and are not steps on the infiltration path.
+# Forcing them onto the nearest of the five -- a SYN flood is not
+# reconnaissance, however many SYNs it sends -- would corrupt the transition
+# dynamics the model exists to learn. The five required stages are all present
+# and unchanged; this is a superset, not a substitution.
 STAGES: tuple[str, ...] = (
     "Benign",
     "Reconnaissance",
@@ -355,14 +365,19 @@ STAGES: tuple[str, ...] = (
     "LateralMovement",
     "CommandAndControl",
     "Exfiltration",
+    "Impact",
 )
 STAGE_INDEX: dict[str, int] = {name: i for i, name in enumerate(STAGES)}
 BENIGN_STAGE = "Benign"
+# Reconnaissance is excluded: being scanned is not being infiltrated. Impact is
+# included, because by the time encryption or denial of service starts, the
+# compromise it followed has already happened.
 DEFAULT_INFILTRATION_STAGES: tuple[str, ...] = (
     "InitialAccess",
     "LateralMovement",
     "CommandAndControl",
     "Exfiltration",
+    "Impact",
 )
 
 

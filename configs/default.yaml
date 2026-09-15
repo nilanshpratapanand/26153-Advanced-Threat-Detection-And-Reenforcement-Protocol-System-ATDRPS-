@@ -35,12 +35,14 @@ mitre:
     - LateralMovement
     - CommandAndControl
     - Exfiltration
+    - Impact                     # TA0040 - DoS, ransomware encryption
   # stages that count as "infiltration in progress" for the probability head
   infiltration_stages:
     - InitialAccess
     - LateralMovement
     - CommandAndControl
     - Exfiltration
+    - Impact
 
 # ----------------------------------------------------------------- world model
 model:

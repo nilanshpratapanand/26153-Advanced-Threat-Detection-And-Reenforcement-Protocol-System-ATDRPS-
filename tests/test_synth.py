@@ -15,7 +15,7 @@ from atdrps.data.schema import PROTO_TCP, TCP_RST, TCP_SYN
 from atdrps.data.synth import generate_capture, write_scenario
 
 CHAIN_ORDER = ["Reconnaissance", "InitialAccess", "LateralMovement",
-               "CommandAndControl", "Exfiltration"]
+               "CommandAndControl", "Exfiltration", "Impact"]
 
 
 class TestGenerator(unittest.TestCase):
@@ -46,6 +46,11 @@ class TestGenerator(unittest.TestCase):
     def test_timeline_respects_the_kill_chain_order(self):
         per_campaign = {}
         for iv in self.cap.timeline:
+            # campaign -1 is the standalone-incident bucket: a worm outbreak or
+            # a SYN flood is not a stage of anybody's kill chain, so it is not
+            # held to the chain ordering.
+            if iv.campaign < 0:
+                continue
             per_campaign.setdefault(iv.campaign, []).append(iv)
         self.assertTrue(per_campaign, "generator produced no campaigns")
         for campaign, intervals in per_campaign.items():
@@ -133,3 +138,109 @@ class TestGenerator(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAdditionalAttackFamilies(unittest.TestCase):
+    """The attacks added from the team's taxonomy (docs/ATTACK_COVERAGE.md).
+
+    Each is checked for the signature it is supposed to have, because a
+    generator that produces the right *label* but the wrong *traffic* teaches
+    the model nothing -- and would look fine in every other test.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.captures = [
+            generate_capture(seed=s, duration_s=3600, n_campaigns=2,
+                             background_intensity=0.12, n_incidents=6)
+            for s in range(5)
+        ]
+
+    def _incidents(self, needle):
+        out = []
+        for cap in self.captures:
+            for iv in cap.timeline:
+                if needle in iv.note.lower():
+                    out.append((cap, iv))
+        return out
+
+    def test_every_family_is_generated(self):
+        for needle in ("worm", "syn flood", "dns tunnel", "credential stuffing",
+                       "web application", "machine-in-the-middle", "ransomware"):
+            with self.subTest(family=needle):
+                self.assertTrue(self._incidents(needle), f"{needle} never generated")
+
+    def test_incidents_span_more_than_one_window(self):
+        """A 30 s window cannot see an attack that lasts 5 s."""
+        for needle in ("worm", "syn flood", "dns tunnel", "ransomware"):
+            for cap, iv in self._incidents(needle):
+                with self.subTest(family=needle):
+                    self.assertGreater(iv.end - iv.start, 30.0)
+
+    def test_worm_fans_out_on_a_single_port(self):
+        """A scan is many ports on one host; a worm is many hosts on one port.
+        Without that distinction the two are the same thing in aggregate."""
+        cap, iv = self._incidents("worm")[0]
+        pkts = [p for p in cap.packets if iv.start <= p.ts <= iv.end
+                and p.src_ip == iv.attacker and p.tcp_flags & TCP_SYN]
+        self.assertGreater(len({p.dst_ip for p in pkts}), 5)
+        self.assertLessEqual(len({p.dst_port for p in pkts}), 2)
+
+    def test_syn_flood_never_completes_a_handshake(self):
+        cap, iv = self._incidents("syn flood")[0]
+        window = [p for p in cap.packets if iv.start <= p.ts <= iv.end
+                  and p.dst_ip == iv.victim]
+        syns = [p for p in window if p.tcp_flags & TCP_SYN]
+        self.assertGreater(len(syns), 200)
+        self.assertGreater(len({p.src_ip for p in syns}), 10)   # distributed
+        self.assertEqual(sum(p.payload_len for p in syns), 0)
+
+    def test_dns_tunnel_queries_are_abnormally_large(self):
+        """Ordinary lookups are tens of bytes; encoded data needs hundreds."""
+        cap, iv = self._incidents("dns tunnel")[0]
+        tunnel = [p.payload_len for p in cap.packets
+                  if iv.start <= p.ts <= iv.end and p.dst_port == 53]
+        benign = [p.payload_len for p in cap.packets
+                  if p.ts < iv.start and p.dst_port == 53]
+        self.assertTrue(tunnel and benign)
+        self.assertGreater(sum(tunnel) / len(tunnel), 2 * sum(benign) / len(benign))
+
+    def test_credential_stuffing_is_distributed_not_concentrated(self):
+        """This is what separates it from brute force: many sources, few
+        attempts each, so per-source rate limits never trigger."""
+        cap, iv = self._incidents("credential stuffing")[0]
+        window = [p for p in cap.packets if iv.start <= p.ts <= iv.end
+                  and p.dst_ip == iv.victim and p.tcp_flags & TCP_SYN]
+        sources = {p.src_ip for p in window}
+        self.assertGreater(len(sources), 8)
+        self.assertLess(len(window) / max(len(sources), 1), 25)
+
+    def test_mitm_makes_one_source_arrive_with_several_ttls(self):
+        cap, iv = self._incidents("machine-in-the-middle")[0]
+        ttls = {}
+        for p in cap.packets:
+            if iv.start <= p.ts <= iv.end:
+                ttls.setdefault(p.src_ip, set()).add(p.ip_ttl)
+        self.assertTrue(any(len(v) > 1 for v in ttls.values()),
+                        "no source shows TTL inconsistency")
+
+    def test_benign_sources_have_a_stable_ttl(self):
+        """The counterpart to the test above: if ordinary hosts jitter their
+        TTL, the MitM signal is worthless."""
+        cap = self.captures[0]
+        quiet_end = min(iv.start for iv in cap.timeline)
+        ttls = {}
+        for p in cap.packets:
+            if p.ts < quiet_end:
+                ttls.setdefault(p.src_ip, set()).add(p.ip_ttl)
+        inconsistent = [k for k, v in ttls.items() if len(v) > 1]
+        self.assertEqual(inconsistent, [], f"unstable TTL for {inconsistent}")
+
+    def test_ransomware_writes_back_at_mtu_over_smb(self):
+        cap, iv = self._incidents("ransomware")[0]
+        writes = [p for p in cap.packets if iv.start <= p.ts <= iv.end
+                  and p.dst_port == 445 and p.payload_len > 0]
+        self.assertGreater(len(writes), 200)
+        at_mtu = [p for p in writes if p.payload_len >= 1400]
+        self.assertGreater(len(at_mtu) / len(writes), 0.2)
+        self.assertGreater(len({p.dst_ip for p in writes}), 1)   # several shares

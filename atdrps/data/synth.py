@@ -107,14 +107,20 @@ class _Gen:
         self.rng = rng
         self.packets: list[PacketRecord] = []
         self._ttl: dict[str, int] = {}
+        self._hops: dict[str, int] = {}
         self._seq: dict[tuple, int] = {}
 
     def ttl_for(self, host: str) -> int:
         if host not in self._ttl:
             base = self.rng.choice([TTL_LINUX, TTL_WINDOWS, TTL_NETDEV], p=[0.6, 0.35, 0.05])
             self._ttl[host] = int(base)
-        # a hop or two of jitter, as real paths show
-        return max(1, self._ttl[host] - int(self.rng.integers(0, 3)))
+        # A real source's TTL is stable: it is the initial value minus a fixed
+        # hop count for that path. Jittering it per packet, as the first version
+        # did, made every host look like it was being relayed and destroyed the
+        # only header-level evidence of a machine-in-the-middle.
+        if host not in self._hops:
+            self._hops[host] = int(self.rng.integers(0, 4))
+        return max(1, self._ttl[host] - self._hops[host])
 
     def next_seq(self, key: tuple, advance: int) -> int:
         cur = self._seq.get(key)
@@ -377,6 +383,196 @@ def _exfiltration(g: _Gen, t0: float, victim: str, sink: str) -> float:
     return t
 
 
+
+
+# ------------------------------------------------- additional attack families
+# These come from the team's attack taxonomy (docs/ATTACK_COVERAGE.md). Each one
+# is generated because it has a distinct, network-visible signature that the
+# five-stage chain alone does not produce -- and because a model that has never
+# seen a SYN flood will happily call one "reconnaissance".
+
+def _worm_propagation(g: _Gen, t0: float, patient_zero: str, targets: list[str]) -> float:
+    """Self-propagation: one host, many hosts, ONE port.
+
+    This is what separates a worm from a scan in aggregate. A scan is one source
+    touching many ports on one host; a worm is one source touching many hosts on
+    one port. Most attempts fail, a few succeed and the payload is pushed.
+    """
+    port = int(g.rng.choice([445, 139, 3389, 22]))
+    t = t0
+    infected = []
+    for target in targets:
+        sport = g.ephemeral()
+        g.emit(t, patient_zero, target, sport, port, flags=TCP_SYN, window=8192)
+        rtt = float(g.rng.uniform(0.0004, 0.02))
+        if g.rng.random() < 0.35:                      # host is up and vulnerable
+            g.emit(t + rtt, target, patient_zero, port, sport, flags=TCP_SYN | TCP_ACK)
+            g.emit(t + 1.5 * rtt, patient_zero, target, sport, port, flags=TCP_ACK)
+            tt = t + 2 * rtt
+            remaining = int(g.rng.integers(180_000, 420_000))   # the worm body
+            while remaining > 0:
+                chunk = min(remaining, 1460)
+                g.emit(tt, patient_zero, target, sport, port,
+                       flags=TCP_PSH | TCP_ACK, payload=chunk, window=8192)
+                remaining -= chunk
+                tt += float(g.rng.uniform(0.0004, 0.004))
+            g.teardown(tt, patient_zero, target, sport, port)
+            infected.append(target)
+        else:                                          # closed or patched
+            g.emit(t + rtt, target, patient_zero, port, sport, flags=TCP_RST | TCP_ACK, window=0)
+        t += float(g.rng.uniform(1.5, 7.0))
+
+    # second generation: newly infected hosts start scanning too
+    for host in infected[:3]:
+        peers = [x for x in targets if x != host]
+        for target in peers[: int(g.rng.integers(3, 8))]:
+            sport = g.ephemeral()
+            g.emit(t, host, target, sport, port, flags=TCP_SYN, window=8192)
+            g.emit(t + 0.004, target, host, port, sport, flags=TCP_RST | TCP_ACK, window=0)
+            t += float(g.rng.uniform(1.0, 5.0))
+    return t
+
+
+def _ransomware_encryption(g: _Gen, t0: float, host: str, shares: list[str]) -> float:
+    """Mass SMB access followed by write-back of encrypted content.
+
+    The network-level indicator is an SMB connection spike: one host touching
+    many shares in a short window, then pushing back near-MTU writes with no
+    compressibility. Read then write, share after share.
+    """
+    t = t0
+    for share in shares:
+        sport = g.ephemeral()
+        t = g.handshake(t, host, share, sport, 445)
+        n_files = int(g.rng.integers(180, 420))
+        for _ in range(n_files):
+            # read the original
+            g.emit(t, host, share, sport, 445, flags=TCP_PSH | TCP_ACK,
+                   payload=int(g.rng.integers(90, 200)), window=65535)
+            t += float(g.rng.uniform(0.004, 0.03))
+            size = int(g.rng.integers(400, 1460))
+            g.emit(t, share, host, 445, sport, flags=TCP_PSH | TCP_ACK,
+                   payload=size, window=65535)
+            t += float(g.rng.uniform(0.004, 0.03))
+            # write the encrypted replacement -- consistently near MTU
+            g.emit(t, host, share, sport, 445, flags=TCP_PSH | TCP_ACK,
+                   payload=1460, window=65535)
+            t += float(g.rng.uniform(0.004, 0.03))
+        g.teardown(t, host, share, sport, 445)
+        t += float(g.rng.uniform(0.5, 4.0))
+    return t
+
+
+def _ddos_flood(g: _Gen, t0: float, victim: str, sources: list[str], duration: float) -> float:
+    """Volumetric SYN flood: many sources, one destination, no handshake ever
+    completes. Impact (TA0040), not a step toward infiltration."""
+    port = int(g.rng.choice([80, 443, 53]))
+    t = t0
+    end = t0 + duration
+    while t < end:
+        src = str(g.rng.choice(sources))
+        g.emit(t, src, victim, g.ephemeral(), port, flags=TCP_SYN, payload=0, window=512)
+        if g.rng.random() < 0.25:                      # victim still answering
+            g.emit(t + 0.001, victim, src, port, g.ephemeral(),
+                   flags=TCP_SYN | TCP_ACK, window=0)
+        t += float(g.rng.uniform(0.0015, 0.012))
+    return t
+
+
+def _dns_tunnel(g: _Gen, t0: float, victim: str, resolver: str, duration: float) -> float:
+    """Exfiltration over DNS: a query-rate spike where responses dwarf queries.
+
+    Encoded data rides in long subdomains and comes back in oversized TXT
+    records -- so the query payload is large for DNS, and the response is larger
+    still, which is the opposite of ordinary lookups.
+    """
+    t = t0
+    end = t0 + duration
+    while t < end:
+        sport = g.ephemeral()
+        g.emit(t, victim, resolver, sport, 53, proto=PROTO_UDP,
+               payload=int(g.rng.integers(120, 250)))       # long encoded subdomain
+        g.emit(t + float(g.rng.uniform(0.002, 0.03)), resolver, victim, 53, sport,
+               proto=PROTO_UDP, payload=int(g.rng.integers(400, 900)))   # TXT reply
+        t += float(g.rng.uniform(0.02, 0.18))
+    return t
+
+
+def _credential_stuffing(g: _Gen, t0: float, sources: list[str], victim: str) -> float:
+    """Many sources, a handful of attempts each.
+
+    Per-source rate limiting sees nothing here; only the window-level view --
+    how many distinct sources converged on one service -- shows it.
+    """
+    service = int(g.rng.choice([443, 80, 22]))
+    t = t0
+    for src in sources:
+        for _ in range(int(g.rng.integers(1, 4))):
+            sport = g.ephemeral()
+            t = g.handshake(t, src, victim, sport, service)
+            g.emit(t, src, victim, sport, service, flags=TCP_PSH | TCP_ACK,
+                   payload=int(g.rng.integers(180, 420)))
+            t += float(g.rng.uniform(0.05, 0.4))
+            g.emit(t, victim, src, service, sport, flags=TCP_PSH | TCP_ACK,
+                   payload=int(g.rng.integers(120, 300)))
+            t += float(g.rng.uniform(0.02, 0.2))
+            g.teardown(t, src, victim, sport, service)
+            t += float(g.rng.uniform(0.3, 2.5))
+    return t
+
+
+def _web_attack(g: _Gen, t0: float, attacker: str, victim: str) -> float:
+    """Injection probing: repeated requests to one endpoint with unusual request
+    sizes and a raised rate of short, uniform error replies.
+
+    The payload itself is invisible without deep inspection; the shape is not.
+    """
+    service = int(g.rng.choice([80, 443, 8080]))
+    t = t0
+    for _ in range(int(g.rng.integers(60, 200))):
+        sport = g.ephemeral()
+        t = g.handshake(t, attacker, victim, sport, service)
+        g.emit(t, attacker, victim, sport, service, flags=TCP_PSH | TCP_ACK,
+               payload=int(g.rng.integers(400, 2400)))     # long injected query string
+        t += float(g.rng.uniform(0.01, 0.12))
+        if g.rng.random() < 0.8:                            # rejected: short, uniform
+            g.emit(t, victim, attacker, service, sport, flags=TCP_PSH | TCP_ACK, payload=180)
+        else:
+            g.emit(t, victim, attacker, service, sport, flags=TCP_PSH | TCP_ACK,
+                   payload=int(g.rng.integers(1200, 9000)))
+        t += float(g.rng.uniform(0.01, 0.1))
+        g.teardown(t, attacker, victim, sport, service)
+        t += float(g.rng.uniform(0.05, 0.9))
+    return t
+
+
+def _mitm_injection(g: _Gen, t0: float, victim: str, peer: str, duration: float) -> float:
+    """The ARP spoofing itself is below IP, so it is not in the capture. Its
+    consequences are: the victim's packets arrive with inconsistent TTLs because
+    some are relayed, and the attacker injects RSTs into live conversations."""
+    t = t0
+    end = t0 + duration
+    while t < end:
+        sport = g.ephemeral()
+        t = g.handshake(t, victim, peer, sport, 80)
+        for _ in range(int(g.rng.integers(6, 20))):
+            rec = g.emit(t, victim, peer, sport, 80, flags=TCP_PSH | TCP_ACK,
+                         payload=int(g.rng.integers(200, 1200)))
+            if g.rng.random() < 0.5:
+                # relayed through the attacker: one hop fewer than the rest
+                rec.ip_ttl = max(1, rec.ip_ttl - int(g.rng.integers(2, 6)))
+            t += float(g.rng.uniform(0.01, 0.09))
+            g.emit(t, peer, victim, 80, sport, flags=TCP_PSH | TCP_ACK,
+                   payload=int(g.rng.integers(200, 1400)))
+            t += float(g.rng.uniform(0.01, 0.06))
+        if g.rng.random() < 0.6:                            # injected reset
+            g.emit(t, peer, victim, 80, sport, flags=TCP_RST | TCP_ACK, window=0)
+        else:
+            g.teardown(t, victim, peer, sport, 80)
+        t += float(g.rng.uniform(1.0, 8.0))
+    return t
+
+
 # --------------------------------------------------------------- generator
 def generate_capture(
     seed: int = 1337,
@@ -386,8 +582,20 @@ def generate_capture(
     n_internal: int = 12,
     background_intensity: float = 0.35,
     continue_probs: tuple[float, float, float, float] = (0.80, 0.80, 0.75, 0.75),
+    n_incidents: int = 3,
+    ransomware_prob: float = 0.35,
 ) -> SyntheticCapture:
     """Build a labelled capture.
+
+    ``n_incidents`` injects standalone attacks that are not part of a
+    five-stage campaign -- worm outbreaks, denial of service, DNS tunnelling,
+    credential stuffing, web probing, machine-in-the-middle. They come from the
+    team's attack taxonomy (``docs/ATTACK_COVERAGE.md``) and exist so the model
+    is trained on traffic that contains them: a model that has never seen a SYN
+    flood will cheerfully classify one as reconnaissance.
+
+    ``ransomware_prob`` is the chance a fully-developed campaign ends in mass
+    SMB encryption (Impact) rather than stopping at exfiltration.
 
     ``continue_probs`` is the chance a campaign advances past each stage
     (recon->access, access->lateral, lateral->C2, C2->exfil).  The defaults give
@@ -464,6 +672,69 @@ def generate_capture(
         timeline.append(StageInterval(t, t_ex_end, "Exfiltration", c2_hosts[c], victim, c,
                                       "bulk outbound transfer"))
 
+        # double extortion: steal first, then encrypt
+        if rng.random() < ransomware_prob and t_ex_end < t_end - 120:
+            t = t_ex_end + float(rng.uniform(5, 60))
+            shares = [str(x) for x in rng.choice(
+                [h for h in internal if h != victim],
+                size=int(rng.integers(2, 5)), replace=False)]
+            t_rw_end = _ransomware_encryption(g, t, victim, shares)
+            timeline.append(StageInterval(t, t_rw_end, "Impact", victim, ",".join(shares), c,
+                                          "ransomware: mass SMB encryption"))
+
+    # ---- standalone incidents, unrelated to the campaigns above
+    botnet = [f"{int(rng.integers(1, 223))}.{int(rng.integers(0, 255))}."
+              f"{int(rng.integers(0, 255))}.{int(rng.integers(1, 254))}"
+              for _ in range(40)]
+    catalogue = ["worm", "ddos", "dns_tunnel", "cred_stuffing", "web_attack", "mitm",
+                 "ransomware"]
+    for _ in range(max(0, n_incidents)):
+        kind = str(rng.choice(catalogue))
+        t = float(rng.uniform(start_ts + 30, start_ts + duration_s * 0.9))
+        victim = str(rng.choice(internal))
+        peers = [h for h in internal if h != victim]
+
+        if kind == "worm":
+            targets = [str(x) for x in rng.choice(
+                peers, size=min(len(peers), int(rng.integers(8, 12))), replace=False)]
+            end = _worm_propagation(g, t, victim, targets)
+            timeline.append(StageInterval(t, end, "LateralMovement", victim,
+                                          ",".join(targets), -1, "worm propagation"))
+        elif kind == "ddos":
+            end = _ddos_flood(g, t, victim, botnet, float(rng.uniform(45, 150)))
+            timeline.append(StageInterval(t, end, "Impact", "botnet", victim, -1,
+                                          "volumetric SYN flood"))
+        elif kind == "dns_tunnel":
+            end = _dns_tunnel(g, t, victim, resolver, float(rng.uniform(120, 420)))
+            timeline.append(StageInterval(t, end, "Exfiltration", victim, resolver, -1,
+                                          "DNS tunnelling"))
+        elif kind == "cred_stuffing":
+            sources = [str(x) for x in rng.choice(botnet, size=int(rng.integers(12, 30)),
+                                                  replace=False)]
+            end = _credential_stuffing(g, t, sources, victim)
+            timeline.append(StageInterval(t, end, "InitialAccess", "distributed", victim, -1,
+                                          "credential stuffing"))
+        elif kind == "web_attack":
+            attacker = str(rng.choice(botnet))
+            end = _web_attack(g, t, attacker, victim)
+            timeline.append(StageInterval(t, end, "InitialAccess", attacker, victim, -1,
+                                          "web application probing"))
+        elif kind == "ransomware":
+            # not every ransomware incident is preceded by a campaign we
+            # observed -- the intrusion may predate the capture entirely
+            shares = [str(x) for x in rng.choice(
+                peers, size=min(len(peers), int(rng.integers(2, 5))), replace=False)]
+            end = _ransomware_encryption(g, t, victim, shares)
+            timeline.append(StageInterval(t, end, "Impact", victim, ",".join(shares), -1,
+                                          "ransomware: mass SMB encryption"))
+        else:  # mitm
+            peer = str(rng.choice(peers))
+            end = _mitm_injection(g, t, victim, peer, float(rng.uniform(90, 300)))
+            timeline.append(StageInterval(t, end, "Reconnaissance", "on-path", victim, -1,
+                                          "machine-in-the-middle"))
+
+    timeline.sort(key=lambda iv: iv.start)
+
     # Collection stops when the capture window ends, so anything a campaign
     # would have done afterwards simply is not in the file -- and a stage that
     # was still running is truncated, not recorded in full. Without this a
@@ -488,6 +759,7 @@ def generate_capture(
         "n_packets": len(packets),
         "n_campaigns": n_campaigns,
         "continue_probs": list(continue_probs),
+        "n_incidents": n_incidents,
         "internal_hosts": internal,
         "external_hosts": externals,
         "attackers": attackers,

@@ -195,11 +195,22 @@ class TestLabelling(unittest.TestCase):
         self.assertEqual(states.label_source, "dataset labels")
 
     def test_out_of_scope_only_window_is_masked_out(self):
-        frame = make_flows([flow(1.0, label="DDoS attacks-LOIC-HTTP"),
-                            flow(2.0, label="DoS attacks-Hulk")])
+        """Unrecognised families must not supervise the stage head."""
+        frame = make_flows([flow(1.0, label="Fuzzers"),
+                            flow(2.0, label="some-2027-attack")])
         states = build_windows(frame, window_size_s=30.0)
         self.assertFalse(states.stage_mask[0])
         self.assertEqual(states.infiltration[0], 0)
+
+    def test_denial_of_service_window_is_labelled_impact(self):
+        """DoS is a real stage now, so it trains the model instead of being
+        masked away -- that is what teaches it a flood is not a scan."""
+        frame = make_flows([flow(1.0, label="DDoS attacks-LOIC-HTTP"),
+                            flow(2.0, label="DoS attacks-Hulk")])
+        states = build_windows(frame, window_size_s=30.0)
+        self.assertTrue(states.stage_mask[0])
+        self.assertEqual(states.stage_names()[0], "Impact")
+        self.assertEqual(states.infiltration[0], 1)
 
     def test_unlabelled_capture_trains_nothing(self):
         frame = make_flows([flow(1.0), flow(2.0)]).drop(columns=["label"])
@@ -220,3 +231,80 @@ class TestLabelling(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAttackFamilyDetectors(unittest.TestCase):
+    """The seven detectors added for the attack taxonomy.
+
+    Each is driven with hand-built traffic that has exactly the property the
+    detector is named after, and with a benign control that does not -- so a
+    detector that fires on everything fails here.
+    """
+
+    def index(self, states, name):
+        return states.feature_names.index(name)
+
+    def value(self, rows, name, window=0, **kw):
+        states = build_windows(make_flows(rows), window_size_s=30.0, **kw)
+        return float(states.X[window][self.index(states, name)]), states
+
+    def test_worm_fanout_separates_from_a_port_scan(self):
+        """One source, many hosts, ONE port -- versus one source, one host,
+        many ports. In aggregate these look alike; this is what splits them."""
+        worm = [flow(1.0 + i * 0.1, dst=f"10.0.0.{i + 2}", dport=445) for i in range(12)]
+        scan = [flow(1.0 + i * 0.1, dst="10.0.0.2", dport=1000 + i) for i in range(12)]
+        worm_v, _ = self.value(worm, "log_same_port_fanout")
+        scan_v, _ = self.value(scan, "log_same_port_fanout")
+        self.assertGreater(worm_v, np.log1p(10))
+        self.assertLess(scan_v, np.log1p(2))
+
+    def test_half_open_ratio_catches_a_flood(self):
+        flood = [dict(flow(1.0 + i * 0.01, src=f"9.9.9.{i % 50}"),
+                      syn_count=1.0, ack_count=0.0) for i in range(60)]
+        normal = [dict(flow(1.0 + i * 0.1), syn_count=1.0, ack_count=8.0) for i in range(30)]
+        self.assertGreater(self.value(flood, "half_open_ratio")[0], 0.9)
+        self.assertEqual(self.value(normal, "half_open_ratio")[0], 0.0)
+
+    def test_many_sources_on_one_service(self):
+        stuffing = [flow(1.0 + i * 0.1, src=f"9.9.9.{i}", dst="10.0.0.5", dport=443)
+                    for i in range(20)]
+        spread = [flow(1.0 + i * 0.1, src="10.0.0.1", dst=f"10.0.0.{i + 2}", dport=443)
+                  for i in range(20)]
+        self.assertGreater(self.value(stuffing, "log_max_srcs_per_dst_service")[0],
+                           np.log1p(15))
+        self.assertLess(self.value(spread, "log_max_srcs_per_dst_service")[0], np.log1p(2))
+
+    def test_dns_query_size_separates_tunnelling_from_lookups(self):
+        """The response/query ratio does not work -- real lookups already return
+        far more than they ask. The query size does."""
+        tunnel = [flow(1.0 + i * 0.1, dport=53, proto=17, fwd_bytes=200.0,
+                       bwd_bytes=700.0, total_bytes=900.0) for i in range(20)]
+        lookups = [flow(1.0 + i * 0.1, dport=53, proto=17, fwd_bytes=45.0,
+                        bwd_bytes=280.0, total_bytes=325.0) for i in range(20)]
+        self.assertGreater(self.value(tunnel, "log_dns_query_size")[0],
+                           self.value(lookups, "log_dns_query_size")[0] + 1.0)
+        self.assertAlmostEqual(self.value(tunnel, "dns_share")[0], 1.0, places=5)
+
+    def test_ttl_inconsistency_is_a_fraction_not_a_count(self):
+        """A raw count of distinct TTLs grows with traffic volume and would just
+        re-measure how busy the window is."""
+        relayed = [dict(flow(1.0 + i * 0.1, src="10.0.0.5", dst=f"10.0.0.{i + 10}"),
+                        fwd_ttl_mean=float(64 - (i % 2) * 4)) for i in range(10)]
+        stable = [dict(flow(1.0 + i * 0.1, src="10.0.0.5", dst=f"10.0.0.{i + 10}"),
+                       fwd_ttl_mean=64.0) for i in range(10)]
+        self.assertGreater(self.value(relayed, "ttl_inconsistency")[0], 0.5)
+        self.assertEqual(self.value(stable, "ttl_inconsistency")[0], 0.0)
+
+    def test_rst_injection_ignores_refused_connections(self):
+        """A failed login is handshake, request, reply, reset -- six packets.
+        Counting that as injection would flag every brute-force window."""
+        injected = [dict(flow(1.0 + i * 0.1, total_packets=40.0), rst_count=1.0)
+                    for i in range(10)]
+        refused = [dict(flow(1.0 + i * 0.1, total_packets=6.0), rst_count=1.0)
+                   for i in range(10)]
+        self.assertGreater(self.value(injected, "rst_injection_ratio")[0], 0.9)
+        self.assertEqual(self.value(refused, "rst_injection_ratio")[0], 0.0)
+
+    def test_detectors_stay_finite_on_an_empty_window(self):
+        states = build_windows(make_flows([flow(1.0), flow(200.0)]), window_size_s=30.0)
+        self.assertTrue(np.isfinite(states.X).all())

@@ -194,6 +194,7 @@ def _episode_features(table: PacketTable, idx: np.ndarray, fwd_mask: np.ndarray)
     feats.update({
         "ttl_mean": ttl_mean, "ttl_std": ttl_std, "ttl_min": ttl_min,
         "ttl_max": ttl_max, "ttl_unique": float(np.unique(ttl).size),
+        "fwd_ttl_mean": float(ttl[fwd_mask].mean()) if fwd_mask.any() else ttl_mean,
     })
     win_mean, win_std, win_min, win_max = _stat4(window)
     feats.update({
