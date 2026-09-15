@@ -6,88 +6,201 @@
 <title>ATDRPS — network attack forecasting</title>
 <style>
   :root{
-    --bg:#0b0f14; --panel:#121820; --panel-2:#171f2a; --line:#1f2a37;
-    --ink:#e6edf3; --muted:#8b98a8; --dim:#5b6776;
-    --accent:#4da3ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
-    --recon:#58a6ff; --ia:#d29922; --lm:#db6d28; --c2:#bc8cff; --exf:#f85149; --benign:#3fb950;
+    --bg:#070a0f; --bg-2:#0b0f16; --panel:#10151d; --panel-2:#161d28; --panel-3:#1b2330;
+    --line:#212b38; --line-soft:#1a212c;
+    --ink:#eaf0f7; --muted:#8fa0b3; --dim:#5b6776;
+    --accent:#4da3ff; --accent-2:#7ec8ff; --accent-glow:rgba(77,163,255,.35);
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+    --recon:#58a6ff; --ia:#d29922; --lm:#e08a3c; --c2:#bc8cff; --exf:#f85149; --benign:#3fb950;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+    --radius:14px; --radius-sm:9px;
+    --shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px -18px rgba(0,0,0,.7);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
-  a{color:var(--accent)}
-  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 72px}
+  ::selection{background:var(--accent-glow);color:#fff}
+  body{
+    margin:0;color:var(--ink);font:14px/1.55 var(--sans);
+    background:
+      radial-gradient(1100px 480px at 18% -8%, rgba(77,163,255,.10), transparent 60%),
+      radial-gradient(900px 420px at 100% 0%, rgba(188,140,255,.06), transparent 55%),
+      var(--bg);
+    min-height:100vh;
+  }
+  a{color:var(--accent-2)}
+  .wrap{max-width:1220px;margin:0 auto;padding:28px 22px 80px}
+
+  /* ---------- header ---------- */
   header{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;
-         border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
-  .logo{font-family:var(--mono);font-weight:700;font-size:22px;letter-spacing:.5px}
-  .logo span{color:var(--accent)}
-  .sub{color:var(--muted);font-size:13px;margin-top:2px}
-  .tag{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+         border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .mark{width:38px;height:38px;border-radius:10px;flex:0 0 auto;
+        background:linear-gradient(155deg,#1a2536,#0d131c);
+        border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+        box-shadow:0 0 0 1px rgba(77,163,255,.08) inset, 0 6px 18px -8px rgba(77,163,255,.5);}
+  .mark svg{width:20px;height:20px}
+  .logo{font-family:var(--mono);font-weight:700;font-size:21px;letter-spacing:.3px}
+  .logo span{color:var(--accent-2)}
+  .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .sub b{color:var(--ink);font-weight:600}
+  .tag{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;
-        padding:4px 11px;font-size:12px;color:var(--muted);font-family:var(--mono)}
-  .chip.live{color:var(--ok);border-color:#1c3a24}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-         padding:18px;margin-bottom:18px}
-  .panel h2{margin:0 0 4px;font-size:15px;letter-spacing:.2px}
-  .panel .hint{color:var(--muted);font-size:12.5px;margin:0 0 14px}
-  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+        padding:5px 12px;font-size:11.5px;color:var(--muted);font-family:var(--mono);
+        display:inline-flex;align-items:center;gap:6px}
+  .chip.live{color:var(--ok);border-color:#1c3a24;background:#0d1710}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);
+       box-shadow:0 0 0 3px rgba(63,185,80,.18);animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+  /* ---------- panels ---------- */
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel) 60%,var(--bg-2));
+         border:1px solid var(--line);border-radius:var(--radius);
+         padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow)}
+  .panel h2{margin:0 0 4px;font-size:15px;letter-spacing:.2px;font-weight:650;
+            display:flex;align-items:center;gap:8px}
+  .panel h2 svg{width:16px;height:16px;color:var(--accent-2);flex:0 0 auto}
+  .panel .hint{color:var(--muted);font-size:12.5px;margin:0 0 16px;max-width:74ch}
+
+  /* ---------- upload ---------- */
+  .dropzone{
+    border:1.5px dashed var(--line);border-radius:var(--radius-sm);
+    background:var(--panel-2);padding:22px;display:flex;align-items:center;gap:16px;
+    cursor:pointer;transition:border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--accent);background:#0f1a26}
+  .dropzone .icon{width:42px;height:42px;border-radius:10px;background:var(--panel-3);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--accent-2)}
+  .dropzone .icon svg{width:20px;height:20px}
+  .dz-title{font-weight:600;font-size:13.5px}
+  .dz-sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .dz-file{color:var(--accent-2);font-family:var(--mono);font-size:12.5px;margin-top:4px}
+  input[type=file]{display:none}
+
+  .controls{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:16px}
   .field{display:flex;flex-direction:column;gap:6px}
-  label{font-size:12px;color:var(--muted);font-family:var(--mono)}
-  input[type=file]{color:var(--muted);font-size:13px}
+  label{font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
   input[type=number]{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
-                     border-radius:6px;padding:7px 9px;width:110px;font-family:var(--mono)}
-  button{background:var(--accent);color:#04101f;border:0;border-radius:6px;font-weight:650;
-         padding:9px 18px;cursor:pointer;font-size:13.5px}
-  button:disabled{opacity:.5;cursor:default}
-  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
-  .headline{font-size:17px;font-weight:600;margin:0 0 6px}
+                     border-radius:8px;padding:9px 10px;width:100px;font-family:var(--mono);
+                     transition:border-color .15s}
+  input[type=number]:focus{outline:none;border-color:var(--accent)}
+  button{background:linear-gradient(180deg,var(--accent-2),var(--accent));color:#04101f;border:0;
+         border-radius:8px;font-weight:650;padding:10px 20px;cursor:pointer;font-size:13.5px;
+         box-shadow:0 6px 16px -6px var(--accent-glow);transition:transform .1s, box-shadow .15s;
+         display:inline-flex;align-items:center;gap:7px}
+  button:hover{box-shadow:0 8px 20px -6px var(--accent-glow);transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  button:disabled{opacity:.45;cursor:default;box-shadow:none;transform:none}
+  button svg{width:15px;height:15px}
+  button.ghost{background:transparent;color:var(--accent-2);border:1px solid var(--line);
+               box-shadow:none;font-weight:600}
+  button.ghost:hover{border-color:var(--accent);box-shadow:none;background:rgba(77,163,255,.06)}
+
+  .headline{font-size:17px;font-weight:650;margin:0 0 6px}
   .meta{color:var(--muted);font-size:12.5px;font-family:var(--mono)}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+
+  /* ---------- stat cards ---------- */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+  @media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);
+        padding:16px 18px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:6px}
+  .stat .label{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);
+               font-family:var(--mono)}
+  .stat .value{font-size:22px;font-weight:700;font-family:var(--mono);display:flex;align-items:baseline;gap:8px}
+  .stat .value small{font-size:12px;color:var(--muted);font-weight:500}
+  .stat.risk .value{color:var(--bad)}
+  .gauge-stat{flex-direction:row;align-items:center;gap:14px}
+  .gauge-stat .g-text{display:flex;flex-direction:column;gap:2px}
+
+  /* ---------- tables ---------- */
   table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
-  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
-  .scroll{overflow-x:auto}
-  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;
-         font-family:var(--mono);border:1px solid transparent}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+  th{color:var(--dim);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;
+     position:sticky;top:0;background:var(--panel)}
+  tbody tr{transition:background .1s}
+  tbody tr:hover{background:var(--panel-2)}
+  .scroll{overflow-x:auto;border-radius:var(--radius-sm)}
+  .scroll::-webkit-scrollbar{height:8px}
+  .scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;
+         font-family:var(--mono);border:1px solid transparent;font-weight:600;letter-spacing:.2px}
   .b-Benign{color:var(--benign);border-color:#1c3a24;background:#0f1f14}
   .b-Reconnaissance{color:var(--recon);border-color:#17324f;background:#0d1a29}
   .b-InitialAccess{color:var(--ia);border-color:#4a3a10;background:#221a08}
   .b-LateralMovement{color:var(--lm);border-color:#4d2c12;background:#241408}
   .b-CommandAndControl{color:var(--c2);border-color:#3c2b57;background:#1b1329}
   .b-Exfiltration{color:var(--bad);border-color:#5a1d1a;background:#2a0f0e}
-  .bar{position:relative;height:16px;background:var(--panel-2);border-radius:3px;overflow:hidden;min-width:120px}
-  .bar > i{position:absolute;inset:0 auto 0 0;display:block;border-radius:3px}
-  .driver{display:grid;grid-template-columns:1fr 150px 74px;gap:10px;align-items:center;
-          padding:5px 0;border-bottom:1px solid var(--line)}
+
+  .bar{position:relative;height:14px;background:var(--panel-2);border-radius:4px;overflow:hidden;min-width:110px}
+  .bar > i{position:absolute;inset:0 auto 0 0;display:block;border-radius:4px;
+           transition:width .5s cubic-bezier(.2,.8,.2,1)}
+  .up{background:linear-gradient(90deg,#c0392b,var(--bad))}
+  .down{background:linear-gradient(90deg,#1f7a37,var(--ok))}
+
+  .driver{display:grid;grid-template-columns:1fr 140px 70px;gap:10px;align-items:center;
+          padding:7px 0;border-bottom:1px solid var(--line-soft)}
+  .driver:last-child{border-bottom:none}
   .driver .name{font-size:12.5px}
   .driver .val{font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted)}
-  .up{background:var(--bad)} .down{background:var(--ok)}
-  .err{border-color:#5a1d1a;background:#1c1010;color:#ffb4ae}
-  .hidden{display:none}
-  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+
+  /* ---------- forecast steps ---------- */
+  .steps{display:flex;flex-direction:column;gap:8px}
+  .step{display:grid;grid-template-columns:36px 1fr 120px 56px;gap:12px;align-items:center;
+        padding:9px 10px;border-radius:9px;background:var(--panel-2);border:1px solid var(--line-soft)}
+  .step .n{font-family:var(--mono);font-size:11.5px;color:var(--dim);font-weight:700}
+  .step .conf{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right}
+
+  /* ---------- chips / legend ---------- */
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .kw-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);
+           background:var(--panel-2);border-radius:999px;padding:4px 10px;font-size:11.5px;
+           font-family:var(--mono);color:var(--muted)}
+
   .spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);
            border-radius:50%;display:inline-block;animation:spin .8s linear infinite;vertical-align:-2px}
   @keyframes spin{to{transform:rotate(360deg)}}
+  .err{border-color:#5a1d1a;background:#1c1010;color:#ffb4ae}
+  .hidden{display:none !important}
   ul.notes{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:12.5px}
-  .foot{color:var(--dim);font-size:12px;margin-top:26px;text-align:center}
+  ul.notes li{margin-bottom:3px}
+  .foot{color:var(--dim);font-size:12px;margin-top:30px;text-align:center;
+        display:flex;align-items:center;justify-content:center;gap:8px}
+  .foot svg{width:13px;height:13px;opacity:.7}
+
+  .fade-in{animation:fadeIn .35s ease both}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+         padding:46px 20px;color:var(--dim);text-align:center;gap:10px}
+  .empty svg{width:34px;height:34px;opacity:.5}
+  .empty .t{font-size:13px;color:var(--muted)}
 </style>
 </head>
 <body>
 <div class="wrap">
 
   <header>
-    <div>
-      <div class="logo">ATD<span>RPS</span></div>
-      <div class="sub">Advanced Threat Detection and Reinforcement Protocol System &middot;
-        world-model network attack forecasting</div>
-      <div class="sub">SIH 2026 &middot; PS 26153 &middot; NTRO &middot; Team Bell Labs</div>
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M12 2 20 5.5v6c0 5-3.4 8.7-8 10.5-4.6-1.8-8-5.5-8-10.5v-6L12 2Z" stroke="#7ec8ff"/>
+          <path d="M9 12l2 2 4-4.5" stroke="#4da3ff"/>
+        </svg>
+      </div>
+      <div>
+        <div class="logo">ATD<span>RPS</span></div>
+        <div class="sub">Advanced Threat Detection and Reinforcement Protocol System &middot;
+          <b>world-model</b> network attack forecasting</div>
+        <div class="sub">SIH 2026 &middot; PS 26153 &middot; NTRO &middot; Team Bell Labs</div>
+      </div>
     </div>
     <div class="tag">
-      <span class="chip live">fully offline</span>
+      <span class="chip live"><span class="dot"></span>fully offline</span>
       <span class="chip">{{ window_size }}s windows</span>
       <span class="chip">K = {{ horizon }}</span>
-      <span class="chip" id="modelChip">model: loading…</span>
+      <span class="chip" id="modelChip">model: loading&hellip;</span>
     </div>
   </header>
 
@@ -99,16 +212,30 @@
   {% endif %}
 
   <div class="panel">
-    <h2>Analyse a capture</h2>
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14"/></svg>
+      Analyse a capture
+    </h2>
     <p class="hint">Accepts a PCAP/PCAPNG capture or a flow CSV (CIC-IDS2018, CIC-IDS2017,
-      UNSW-NB15, CTU-13). Nothing leaves this machine.</p>
+      UNSW-NB15, CTU-13). Nothing leaves this machine — parsing, feature extraction and
+      inference all run locally.</p>
     <form id="form">
-      <div class="row">
-        <div class="field">
-          <label for="capture">capture file</label>
-          <input id="capture" name="capture" type="file"
-                 accept=".pcap,.pcapng,.cap,.dmp,.csv" required>
+      <label for="capture" style="display:none">capture file</label>
+      <div id="dropzone" class="dropzone">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3M12 3v12m0-12 4 4m-4-4-4 4"/>
+          </svg>
         </div>
+        <div>
+          <div class="dz-title">Drop a capture here, or click to browse</div>
+          <div class="dz-sub">.pcap &middot; .pcapng &middot; .cap &middot; .dmp &middot; .csv</div>
+          <div class="dz-file" id="fileName"></div>
+        </div>
+      </div>
+      <input id="capture" name="capture" type="file" accept=".pcap,.pcapng,.cap,.dmp,.csv" required>
+
+      <div class="controls">
         <div class="field">
           <label for="threshold">alert threshold</label>
           <input id="threshold" name="threshold" type="number" step="0.05" min="0" max="1" value="0.5">
@@ -117,36 +244,76 @@
           <label for="horizon">horizon K</label>
           <input id="horizon" name="horizon" type="number" min="1" max="20" value="{{ horizon }}">
         </div>
-        <button id="go" type="submit" {% if not ready %}disabled{% endif %}>Forecast</button>
-        <button id="demo" type="button" class="ghost">What am I looking at?</button>
+        <button id="go" type="submit" {% if not ready %}disabled{% endif %}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14m0 0-6-6m6 6-6 6"/></svg>
+          Forecast
+        </button>
+        <button id="demo" type="button" class="ghost">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
+          What am I looking at?
+        </button>
       </div>
     </form>
-    <div id="status" class="meta" style="margin-top:12px"></div>
+    <div id="status" class="meta" style="margin-top:14px"></div>
   </div>
 
   <div id="about" class="panel hidden">
     <h2>What this is doing</h2>
     <p class="hint">A conventional IDS labels each flow benign or malicious. ATDRPS instead
-      groups traffic into fixed time windows, encodes each window as a 96-dimensional network
-      <em>state</em>, and learns how those states evolve. It then rolls that model forward K
-      steps to estimate whether the network is heading toward compromise, maps the predicted
-      state to a MITRE ATT&amp;CK stage, and reports the measurements that drove the call.</p>
+      groups traffic into fixed time windows, encodes each window as a high-dimensional network
+      <em>state</em>, and learns how those states evolve — a world model, <code>P(S<sub>t+1</sub>|S<sub>t</sub>)</code>.
+      It then rolls that model forward K steps to estimate whether the network is heading toward
+      compromise, maps the predicted state to a MITRE ATT&amp;CK stage, and reports the
+      measurements that drove the call.</p>
     <div class="legend">
       {% for name, tactic in stages %}
-      <span class="badge b-{{ name }}">{{ name }} · {{ tactic }}</span>
+      <span class="badge b-{{ name }}">{{ name }} &middot; {{ tactic }}</span>
       {% endfor %}
     </div>
   </div>
 
+  <div id="emptyState" class="panel">
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 12h4l2-8 4 16 2-8h6"/></svg>
+      <div class="t">Upload a capture above to see the infiltration timeline, forward simulation and explainability.</div>
+    </div>
+  </div>
+
   <div id="results" class="hidden">
-    <div class="panel">
+
+    <div class="stats fade-in">
+      <div class="stat risk gauge-stat">
+        <svg id="gauge" width="52" height="52" viewBox="0 0 52 52"></svg>
+        <div class="g-text">
+          <div class="label">Peak risk</div>
+          <div class="value" id="peakRiskVal">&mdash;</div>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="label">Predicted stage</div>
+        <div class="value" id="stageVal" style="font-size:15px">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="label">Windows analysed</div>
+        <div class="value" id="windowsVal">&mdash;</div>
+      </div>
+      <div class="stat">
+        <div class="label">Flows / capture</div>
+        <div class="value" id="flowsVal">&mdash;</div>
+      </div>
+    </div>
+
+    <div class="panel fade-in">
       <h2 id="headline" class="headline"></h2>
       <div id="meta" class="meta"></div>
       <ul id="notes" class="notes"></ul>
     </div>
 
-    <div class="panel">
-      <h2>Infiltration probability over time</h2>
+    <div class="panel fade-in">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18M7 15l3-4 3 3 5-7"/></svg>
+        Infiltration probability over time
+      </h2>
       <p class="hint">One-step-ahead probability for every window, then the K-step forward
         simulation (hatched) from the end of the capture. The dashed line is the alert
         threshold.</p>
@@ -154,36 +321,48 @@
     </div>
 
     <div class="grid">
-      <div class="panel">
-        <h2>Forward simulation</h2>
+      <div class="panel fade-in">
+        <h2>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/></svg>
+          Forward simulation
+        </h2>
         <p class="hint">Autoregressive roll-out. Confidence decays with distance — as it should.</p>
-        <div class="scroll"><table id="forecastTable"></table></div>
+        <div id="steps" class="steps"></div>
         <div class="meta" id="forecastNote" style="margin-top:10px;color:#d29922"></div>
       </div>
-      <div class="panel">
-        <h2>Why</h2>
+      <div class="panel fade-in">
+        <h2>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
+          Why
+        </h2>
         <p class="hint" id="whyHint"></p>
         <div id="drivers"></div>
         <div id="ruleBox" style="margin-top:14px"></div>
       </div>
     </div>
 
-    <div class="panel">
-      <h2>Flows inside the peak window</h2>
+    <div class="panel fade-in">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        Flows inside the peak window
+      </h2>
       <p class="hint">The conversations behind the highest-risk window, ranked by how much
         each contributes to that judgement.</p>
       <div class="scroll"><table id="flowTable"></table></div>
     </div>
   </div>
 
-  <div class="foot">ATDRPS runs entirely on this machine — no cloud APIs, no telemetry.</div>
+  <div class="foot">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 20 5.5v6c0 5-3.4 8.7-8 10.5-4.6-1.8-8-5.5-8-10.5v-6L12 2Z"/></svg>
+    ATDRPS runs entirely on this machine — no cloud APIs, no telemetry.
+  </div>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
 const STAGES = ["Benign","Reconnaissance","InitialAccess","LateralMovement","CommandAndControl","Exfiltration"];
 const STAGE_COLOR = {Benign:"#3fb950",Reconnaissance:"#58a6ff",InitialAccess:"#d29922",
-  LateralMovement:"#db6d28",CommandAndControl:"#bc8cff",Exfiltration:"#f85149"};
+  LateralMovement:"#e08a3c",CommandAndControl:"#bc8cff",Exfiltration:"#f85149"};
 
 fetch("/api/health").then(r=>r.json()).then(d=>{
   $("#modelChip").textContent = d.ok ? `model: ${d.model}` : "model: none";
@@ -191,9 +370,28 @@ fetch("/api/health").then(r=>r.json()).then(d=>{
 
 $("#demo").addEventListener("click", () => $("#about").classList.toggle("hidden"));
 
+// ---- drag & drop / file picker ----
+const dz = $("#dropzone"), fileInput = $("#capture"), fileNameEl = $("#fileName");
+dz.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => showFile(fileInput.files[0]));
+["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.add("drag");
+}));
+["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.remove("drag");
+}));
+dz.addEventListener("drop", e => {
+  const f = e.dataTransfer.files[0];
+  if (f) { fileInput.files = e.dataTransfer.files; showFile(f); }
+});
+function showFile(f){
+  if (!f) return;
+  fileNameEl.textContent = `${f.name}  ·  ${(f.size/1e6).toFixed(2)} MB`;
+}
+
 $("#form").addEventListener("submit", async e => {
   e.preventDefault();
-  const file = $("#capture").files[0];
+  const file = fileInput.files[0];
   if (!file) return;
   const body = new FormData();
   body.append("capture", file);
@@ -201,7 +399,7 @@ $("#form").addEventListener("submit", async e => {
   body.append("horizon", $("#horizon").value);
   $("#go").disabled = true;
   $("#status").innerHTML = `<span class="spinner"></span> parsing ${file.name} ` +
-    `(${(file.size/1e6).toFixed(1)} MB), assembling flows, windowing, forecasting…`;
+    `(${(file.size/1e6).toFixed(1)} MB), assembling flows, windowing, forecasting&hellip;`;
   try {
     const res = await fetch("/api/analyse", {method:"POST", body});
     const data = await res.json();
@@ -211,12 +409,14 @@ $("#form").addEventListener("submit", async e => {
   } catch (err) {
     $("#status").innerHTML = `<span style="color:#f85149">${err.message}</span>`;
     $("#results").classList.add("hidden");
+    $("#emptyState").classList.remove("hidden");
   } finally {
     $("#go").disabled = false;
   }
 });
 
 function render(d){
+  $("#emptyState").classList.add("hidden");
   $("#results").classList.remove("hidden");
   $("#headline").textContent = d.headline;
   $("#meta").textContent =
@@ -224,65 +424,112 @@ function render(d){
   const notes = $("#notes"); notes.innerHTML = "";
   (d.notes||[]).forEach(n => { const li=document.createElement("li"); li.textContent=n; notes.appendChild(li); });
 
+  drawStats(d);
   drawChart(d);
   drawForecast(d);
   drawDrivers(d);
   drawFlows(d);
 }
 
+function drawStats(d){
+  const risk = d.peak_risk ?? (d.timeline.length ? Math.max(...d.timeline.map(r=>r.infiltration_probability)) : 0);
+  $("#peakRiskVal").innerHTML = `${(risk*100).toFixed(0)}<small>%</small>`;
+  drawGauge(risk);
+
+  const peakStage = (d.timeline[d.peak_window] || {}).stage || (d.explanation && d.explanation.stage) || "—";
+  $("#stageVal").innerHTML = `<span class="badge b-${peakStage}">${peakStage}</span>`;
+  $("#windowsVal").textContent = d.n_windows;
+  $("#flowsVal").textContent = d.n_flows.toLocaleString();
+}
+
+function drawGauge(v){
+  const r = 21, c = 2*Math.PI*r, pct = Math.max(0, Math.min(1, v));
+  const color = pct >= .7 ? "#f85149" : pct >= .4 ? "#d29922" : "#3fb950";
+  const svg = `
+    <circle cx="26" cy="26" r="${r}" fill="none" stroke="#1f2a37" stroke-width="5"/>
+    <circle cx="26" cy="26" r="${r}" fill="none" stroke="${color}" stroke-width="5"
+      stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c*(1-pct)}"
+      transform="rotate(-90 26 26)" style="transition:stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1)"/>`;
+  $("#gauge").innerHTML = svg;
+}
+
 function drawChart(d){
   const obs = d.timeline, fc = d.forecast || [];
   const n = obs.length + fc.length;
-  const W = 1080, H = 250, padL = 46, padR = 14, padT = 14, padB = 34;
+  const W = 1100, H = 260, padL = 46, padR = 14, padT = 16, padB = 36;
   const iw = W - padL - padR, ih = H - padT - padB;
   const x = i => padL + (n<=1 ? iw/2 : i * iw/(n-1));
   const y = v => padT + ih * (1 - v);
   const thr = parseFloat($("#threshold").value) || 0.5;
 
+  const smooth = (pts) => {
+    if (pts.length < 3) return pts.length ? `M${pts.map(p=>p.join(",")).join(" L")}` : "";
+    let d0 = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i=0;i<pts.length-1;i++){
+      const p0 = pts[i-1] || pts[i], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2] || p2;
+      const c1x = p1[0] + (p2[0]-p0[0])/6, c1y = p1[1] + (p2[1]-p0[1])/6;
+      const c2x = p2[0] - (p3[0]-p1[0])/6, c2y = p2[1] - (p3[1]-p1[1])/6;
+      d0 += ` C${c1x},${c1y} ${c2x},${c2y} ${p2[0]},${p2[1]}`;
+    }
+    return d0;
+  };
+
   let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
-    aria-label="infiltration probability over time">`;
-  svg += `<defs><pattern id="hatch" width="6" height="6" patternTransform="rotate(45)"
-    patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="0" y2="6"
-    stroke="#4da3ff" stroke-width="2" opacity=".35"/></pattern></defs>`;
+    aria-label="infiltration probability over time" style="overflow:visible">`;
+  svg += `<defs>
+    <pattern id="hatch" width="6" height="6" patternTransform="rotate(45)"
+      patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="0" y2="6"
+      stroke="#4da3ff" stroke-width="2" opacity=".3"/></pattern>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4da3ff" stop-opacity=".32"/>
+      <stop offset="100%" stop-color="#4da3ff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>`;
 
   for (let g=0; g<=4; g++){
     const v=g/4, yy=y(v);
-    svg += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="#1f2a37"/>`;
+    svg += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="#1a212c"/>`;
     svg += `<text x="${padL-8}" y="${yy+4}" fill="#5b6776" font-size="11"
       text-anchor="end" font-family="ui-monospace,monospace">${v.toFixed(2)}</text>`;
   }
   if (fc.length){
     svg += `<rect x="${x(obs.length-0.5)}" y="${padT}" width="${x(n-1)-x(obs.length-0.5)}"
-      height="${ih}" fill="url(#hatch)" opacity=".5"/>`;
+      height="${ih}" fill="url(#hatch)" opacity=".6"/>`;
   }
 
   // stage ribbon
   obs.forEach((r,i)=>{
     const w = Math.max(1, iw/(n-1));
-    svg += `<rect x="${x(i)-w/2}" y="${H-padB+6}" width="${w}" height="7"
-      fill="${STAGE_COLOR[r.stage]||"#3fb950"}" opacity=".85"/>`;
+    svg += `<rect x="${x(i)-w/2}" y="${H-padB+8}" width="${w}" height="6" rx="1"
+      fill="${STAGE_COLOR[r.stage]||"#3fb950"}" opacity=".9"/>`;
   });
   fc.forEach((r,i)=>{
     const j = obs.length+i, w = Math.max(1, iw/(n-1));
-    svg += `<rect x="${x(j)-w/2}" y="${H-padB+6}" width="${w}" height="7"
+    svg += `<rect x="${x(j)-w/2}" y="${H-padB+8}" width="${w}" height="6" rx="1"
       fill="${STAGE_COLOR[r.stage]||"#3fb950"}" opacity=".5"/>`;
   });
 
-  const pts = obs.map((r,i)=>`${x(i)},${y(r.infiltration_probability)}`).join(" ");
-  svg += `<polyline points="${pts}" fill="none" stroke="#4da3ff" stroke-width="2"/>`;
+  const obsPts = obs.map((r,i)=>[x(i),y(r.infiltration_probability)]);
+  if (obsPts.length){
+    const areaPath = smooth(obsPts) + ` L${obsPts[obsPts.length-1][0]},${y(0)} L${obsPts[0][0]},${y(0)} Z`;
+    svg += `<path d="${areaPath}" fill="url(#area)"/>`;
+    svg += `<path d="${smooth(obsPts)}" fill="none" stroke="#4da3ff" stroke-width="2.25"
+      stroke-linecap="round"/>`;
+  }
   if (fc.length){
-    const start = `${x(obs.length-1)},${y(obs[obs.length-1].infiltration_probability)}`;
-    const fpts = fc.map((r,i)=>`${x(obs.length+i)},${y(r.infiltration_probability)}`).join(" ");
-    svg += `<polyline points="${start} ${fpts}" fill="none" stroke="#4da3ff"
-      stroke-width="2" stroke-dasharray="5 4" opacity=".85"/>`;
+    const fcPts = [obsPts[obsPts.length-1], ...fc.map((r,i)=>[x(obs.length+i), y(r.infiltration_probability)])];
+    svg += `<path d="${smooth(fcPts)}" fill="none" stroke="#4da3ff"
+      stroke-width="2.25" stroke-dasharray="5 4" opacity=".85" stroke-linecap="round"/>`;
   }
   svg += `<line x1="${padL}" y1="${y(thr)}" x2="${W-padR}" y2="${y(thr)}"
-    stroke="#f85149" stroke-dasharray="4 4" opacity=".8"/>`;
+    stroke="#f85149" stroke-dasharray="4 4" opacity=".75"/>`;
 
   const peak = d.peak_window;
   if (peak >= 0 && obs[peak]){
+    svg += `<circle cx="${x(peak)}" cy="${y(obs[peak].infiltration_probability)}" r="8"
+      fill="#f85149" opacity=".18"/>`;
     svg += `<circle cx="${x(peak)}" cy="${y(obs[peak].infiltration_probability)}" r="4"
-      fill="#f85149"/>`;
+      fill="#f85149" stroke="#0b0f14" stroke-width="2"/>`;
   }
   svg += `<text x="${padL}" y="${H-6}" fill="#5b6776" font-size="11"
     font-family="ui-monospace,monospace">observed windows</text>`;
@@ -294,33 +541,30 @@ function drawChart(d){
   $("#chart").innerHTML = svg;
 }
 
-// Infiltration is defined as InitialAccess onward, so "Reconnaissance" with a
-// low infiltration probability is coherent, not a contradiction. A genuine
-// disagreement is the two heads pointing opposite ways, and it is worth
-// showing rather than hiding: they are trained on different objectives and an
-// analyst should know when they diverge.
 const INFIL_STAGES = new Set(["InitialAccess","LateralMovement","CommandAndControl","Exfiltration"]);
 
 function drawForecast(d){
   const rows = d.forecast || [];
   const thr = parseFloat($("#threshold").value) || 0.5;
-  let html = `<tr><th>step</th><th>p(infiltration)</th><th></th><th>stage</th><th>conf</th></tr>`;
   let disagreements = 0;
+  let html = "";
   rows.forEach(r=>{
     const pct = (r.infiltration_probability*100).toFixed(0);
     const saysInfil = r.infiltration_probability >= thr;
     const stageInfil = INFIL_STAGES.has(r.stage);
     const split = saysInfil !== stageInfil;
     if (split) disagreements++;
-    html += `<tr><td>+${r.step}</td><td>${r.infiltration_probability.toFixed(3)}</td>
-      <td><div class="bar"><i class="up" style="width:${pct}%"></i></div></td>
-      <td><span class="badge b-${r.stage}">${r.stage}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</td>
-      <td>${r.stage_confidence.toFixed(2)}</td></tr>`;
+    html += `<div class="step">
+      <div class="n">+${r.step}</div>
+      <div><span class="badge b-${r.stage}">${r.stage}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</div>
+      <div class="bar"><i class="up" style="width:${pct}%"></i></div>
+      <div class="conf">${(r.infiltration_probability*100).toFixed(0)}% &middot; ${r.stage_confidence.toFixed(2)}</div>
+    </div>`;
   });
-  $("#forecastTable").innerHTML = html;
+  $("#steps").innerHTML = html || `<div class="meta">no forecast horizon configured</div>`;
   const note = $("#forecastNote");
   note.textContent = disagreements
-    ? `\u26a0 ${disagreements} step(s) where the infiltration head and the stage head disagree. ` +
+    ? `⚠ ${disagreements} step(s) where the infiltration head and the stage head disagree. ` +
       `They are separate objectives; divergence means low confidence, not a bug.`
     : "";
 }
@@ -348,13 +592,14 @@ function drawDrivers(d){
     </div>`;
   }).join("");
 
-  const kw = (e.key_windows||[]).map(w=>`${w.windows_ago} window(s) ago (${w.weight.toFixed(2)})`);
-  let extra = `<div class="meta">Most influential time steps via ${e.temporal_source}: ${kw.join(", ")}</div>`;
+  const kw = (e.key_windows||[]).map(w=>`<span class="kw-chip">${w.windows_ago}w ago &middot; ${w.weight.toFixed(2)}</span>`);
+  let extra = `<div class="meta" style="margin-top:10px">Most influential time steps via ${e.temporal_source}:</div>
+    <div class="legend">${kw.join("")}</div>`;
   if (e.rules && e.rules.length){
-    extra += `<div class="meta" style="margin-top:8px">Interpretable rules that agree:</div>
+    extra += `<div class="meta" style="margin-top:10px">Interpretable rules that agree:</div>
       <ul class="notes">${e.rules.map(r=>`<li>${r}</li>`).join("")}</ul>`;
   }
-  extra += `<div class="meta" style="margin-top:8px;color:#5b6776">
+  extra += `<div class="meta" style="margin-top:10px;color:#5b6776">
     attribution efficiency error ${e.efficiency_error.toExponential(1)}
     (Shapley values sum to the prediction gap)</div>`;
   $("#ruleBox").innerHTML = extra;
