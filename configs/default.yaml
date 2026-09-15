@@ -1,0 +1,86 @@
+# ATDRPS - default configuration
+# SIH 2026 | PS 26153 (NTRO) | AI-based Network Attack Forecasting
+#
+# Every stage of the pipeline reads from this file so that a run is fully
+# reproducible from (config + dataset + seed).
+
+seed: 1337
+
+paths:
+  data: data
+  artifacts: artifacts
+
+# ---------------------------------------------------------------- ingestion
+ingest:
+  # 5-tuple flow assembly
+  flow_timeout_s: 120.0          # idle timeout before a flow is closed
+  flow_active_timeout_s: 300.0   # hard cap on a single flow's lifetime
+  max_packets: null              # null = read the whole capture
+  # a TCP flow is also closed on FIN/FIN or RST
+  close_on_teardown: true
+
+# ------------------------------------------------------------- state window
+window:
+  size_s: 30.0                   # width of one network state S_t
+  stride_s: 30.0                 # hop between consecutive states (== size => disjoint)
+  min_flows: 1                   # windows with fewer flows are still emitted (zero state)
+  top_talkers: 5                 # per-window top-N src/dst aggregates folded into the state
+
+# ------------------------------------------------------- MITRE ATT&CK stages
+mitre:
+  stages:
+    - Benign
+    - Reconnaissance
+    - InitialAccess
+    - LateralMovement
+    - CommandAndControl
+    - Exfiltration
+  # stages that count as "infiltration in progress" for the probability head
+  infiltration_stages:
+    - InitialAccess
+    - LateralMovement
+    - CommandAndControl
+    - Exfiltration
+
+# ----------------------------------------------------------------- world model
+model:
+  backend: torch                 # torch | numpy   (numpy = dependency-free ablation)
+  context: 16                    # L observed windows fed to the encoder
+  horizon: 5                     # K forward-simulation steps
+  d_model: 128
+  n_heads: 4
+  n_layers: 3
+  ff_mult: 4
+  dropout: 0.1
+  # numpy backend only
+  ridge_alpha: 1.0
+
+# -------------------------------------------------------------------- training
+train:
+  epochs: 40
+  batch_size: 64
+  lr: 0.0003
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  loss_weights:
+    next_state: 1.0              # dynamics learning  P(S_t+1 | S_<=t)
+    stage: 1.0                   # MITRE stage head
+    infiltration: 1.0            # infiltration probability head
+  class_weighting: balanced      # balanced | none
+  split: time                    # time-based split (never random - leakage)
+  val_frac: 0.15
+  test_frac: 0.20
+  early_stopping_patience: 8
+
+# --------------------------------------------------------------- explainability
+explain:
+  method: both                   # shap | attention | both
+  shap_background: 64            # background coalition size for KernelSHAP
+  shap_samples: 256              # coalitions sampled per explanation
+  top_k: 8                       # drivers reported per prediction
+
+# ---------------------------------------------------------------------- server
+server:
+  host: 127.0.0.1
+  port: 8501
+  max_upload_mb: 256

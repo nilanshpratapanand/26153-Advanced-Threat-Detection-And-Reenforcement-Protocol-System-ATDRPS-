@@ -1,0 +1,22 @@
+# ---- Core (required, pure-python / numeric) ----
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+PyYAML>=6.0
+Flask>=3.0
+matplotlib>=3.7
+
+# ---- World model (required to train/run the Temporal Transformer) ----
+# CPU wheel:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+# CUDA 12.1:  pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.1
+
+# ---- Optional ----
+# networkx>=3.0          # graph state representation (GNN ablation)
+# torch-geometric        # GNN front-end (stretch goal)
+#
+# NOTE: ATDRPS deliberately ships its OWN pcap parser and its OWN KernelSHAP
+# implementation. scapy / pyshark / shap are NOT required. This keeps the
+# tool installable inside air-gapped CII networks, which the problem
+# statement mandates.

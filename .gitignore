@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Data & model artefacts (never commit raw traffic or weights)
+data/raw/
+data/interim/
+data/processed/
+*.pcap
+*.pcapng
+*.npz
+*.pt
+*.pth
+*.joblib
+!tests/fixtures/*.pcap
+
+# Runtime output
+artifacts/**
+!artifacts/.gitkeep
+app/static/uploads/
+*.log
+
+.DS_Store
+.vscode/
+.idea/
