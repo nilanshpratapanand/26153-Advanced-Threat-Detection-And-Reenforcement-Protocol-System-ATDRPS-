@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ..data.datasets import load_flow_csv
-from ..data.flows import assemble_flows
+from ..data.flows import assemble_flows, assemble_flows_parallel
 from ..data.mitre import describe_stage, score_stages
 from ..data.pcap import read_pcap
 from ..data.schema import STAGES, flags_to_str
@@ -44,12 +44,19 @@ PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap", ".dmp"}
 
 
 def load_capture(path: str | Path, window_size_s: float = 30.0,
-                 history_s: float = 600.0, max_packets: int | None = None):
-    """Read a pcap or a flow CSV and return ``(states, flows, source_kind)``."""
+                 history_s: float = 600.0, max_packets: int | None = None,
+                 pool=None):
+    """Read a pcap or a flow CSV and return ``(states, flows, source_kind)``.
+
+    ``pool`` is an optional :class:`~atdrps.engine.pool.PoolConfig`. Flow
+    assembly is ~40% of end-to-end runtime and shards cleanly by conversation,
+    so it is the one stage worth parallelising; everything else here is either
+    inherently sequential (parsing a byte stream) or already small.
+    """
     path = Path(path)
     if path.suffix.lower() in PCAP_SUFFIXES:
         table = read_pcap(path, max_packets=max_packets)
-        flows = assemble_flows(table)
+        flows = assemble_flows_parallel(table, config=pool)
         kind = f"pcap ({len(table)} packets)"
         states = build_windows(flows, window_size_s=window_size_s,
                                history_s=history_s, use_labels=False)
@@ -132,7 +139,8 @@ class ThreatForecastEngine:
     def __init__(self, model, explainer: ForecastExplainer | None = None,
                  window_size_s: float = 30.0, history_s: float = 600.0,
                  threshold: float = 0.5,
-                 policy: ScoringPolicy | None = None) -> None:
+                 policy: ScoringPolicy | None = None,
+                 pool=None) -> None:
         self.model = model
         self.explainer = explainer
         self.window_size_s = float(window_size_s)
@@ -140,6 +148,8 @@ class ThreatForecastEngine:
         self.threshold = float(threshold)
         # dual-track scoring: see atdrps/engine/scoring.py for why
         self.policy = (policy or ScoringPolicy()).validate()
+        # parallel flow assembly: see atdrps/engine/pool.py for the measurements
+        self.pool = pool
 
     # -------------------------------------------------------------- loading
     @classmethod
@@ -171,7 +181,7 @@ class ThreatForecastEngine:
                 explain: bool = True, max_flagged: int = 25,
                 max_packets: int | None = None) -> AnalysisResult:
         states, flows, kind = load_capture(path, self.window_size_s, self.history_s,
-                                           max_packets=max_packets)
+                                           max_packets=max_packets, pool=self.pool)
         result = AnalysisResult(
             source=str(path), source_kind=kind, window_size_s=self.window_size_s,
             n_windows=len(states), n_flows=len(flows),

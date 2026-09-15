@@ -43,7 +43,8 @@ from .schema import (
     PacketTable,
 )
 
-__all__ = ["assemble_flows", "FLOW_META_COLUMNS", "EPS"]
+__all__ = [
+    "assemble_flows_parallel","assemble_flows", "FLOW_META_COLUMNS", "EPS"]
 
 # CICFlowMeter divides by a microsecond floor rather than guarding each rate
 # individually; we do the same so rate features stay comparable with published
@@ -378,3 +379,68 @@ def _row(table: PacketTable, idx: np.ndarray, fwd_mask: np.ndarray) -> dict:
     }
     meta.update(feats)
     return meta
+
+
+# --------------------------------------------------------------- parallel path
+def _assemble_shard(payload: tuple) -> "pd.DataFrame":
+    """Worker entry point: rebuild a PacketTable shard and assemble it.
+
+    Module-level and taking plain data because ProcessPoolExecutor pickles the
+    callable and its argument; a closure over the parent's table would not
+    survive the trip (and would copy the whole capture per worker).
+    """
+    cols, ip_names, idle_timeout_s, active_timeout_s, close_on_teardown = payload
+    table = PacketTable(cols, ip_names)
+    return assemble_flows(table, idle_timeout_s, active_timeout_s, close_on_teardown)
+
+
+def assemble_flows_parallel(
+    table: PacketTable,
+    idle_timeout_s: float = 120.0,
+    active_timeout_s: float = 300.0,
+    close_on_teardown: bool = True,
+    config=None,
+) -> pd.DataFrame:
+    """:func:`assemble_flows`, sharded across workers by conversation id.
+
+    Flow assembly is ~40 % of end-to-end runtime and every conversation is built
+    independently of every other, so it is the pipeline's best parallel target.
+
+    Packets are partitioned on the canonical bidirectional key, so all packets
+    of a conversation land in one shard and no flow can straddle a boundary --
+    the property that makes this safe, and the reason the partition is not on
+    time. Results are concatenated and re-sorted by start time, so the output is
+    identical to the serial path; ``tests/test_pool.py`` asserts that rather
+    than trusting it.
+    """
+    from ..engine.pool import PoolConfig, map_chunks
+
+    config = config or PoolConfig(backend="process", min_units=20_000)
+    n = len(table)
+    if n == 0 or config.effective_backend(n) == "serial":
+        return assemble_flows(table, idle_timeout_s, active_timeout_s, close_on_teardown)
+
+    keys = _canonical_keys(table)
+    n_shards = min(config.workers, max(1, len(np.unique(keys))))
+    if n_shards <= 1:
+        return assemble_flows(table, idle_timeout_s, active_timeout_s, close_on_teardown)
+
+    # non-negative modulo: keys are a signed 64-bit mix
+    shard_of = np.mod(keys, n_shards)
+    payloads = []
+    for s in range(n_shards):
+        idx = np.flatnonzero(shard_of == s)
+        if idx.size == 0:
+            continue
+        shard = table[idx]
+        payloads.append((shard.cols, shard.ip_names,
+                         idle_timeout_s, active_timeout_s, close_on_teardown))
+    if len(payloads) <= 1:
+        return assemble_flows(table, idle_timeout_s, active_timeout_s, close_on_teardown)
+
+    frames = [f for f in map_chunks(_assemble_shard, payloads, config, work_size=n) if len(f)]
+    if not frames:
+        columns = list(FLOW_META_COLUMNS) + list(FLOW_FEATURES) + list(PACKET_FEATURES)
+        return pd.DataFrame(columns=columns)
+    out = pd.concat(frames, ignore_index=True)
+    return out.sort_values("start_ts", kind="stable").reset_index(drop=True)
