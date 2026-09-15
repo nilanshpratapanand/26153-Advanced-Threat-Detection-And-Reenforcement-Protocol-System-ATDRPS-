@@ -80,8 +80,12 @@ if errorlevel 1 (echo   !!  could not upgrade pip - continuing) else (echo   ok 
 echo ==^> installing requirements  (this takes a minute or two)
 "%VPY%" -m pip install --quiet -r requirements.txt
 if errorlevel 1 (
-  echo   !!  pip could not install everything from requirements.txt
-  echo   !!  if this machine is offline, see the note at the end
+  echo   !!  pip could not download packages. Trying with system site packages...
+  cd /d "%~dp0"
+  rmdir /s /q .venv 2>nul
+  %PY% -m venv .venv --system-site-packages
+  set "VPY=%CD%\.venv\Scripts\python.exe"
+  echo   ok  venv created with system site packages
 ) else (
   echo   ok  core requirements installed
 )
@@ -98,9 +102,9 @@ if defined WANT_TORCH (
 
 REM ------------------------------------------------------------- self-check
 echo ==^> checking the install
-"%VPY%" -c "import importlib,sys; m=[x for x in ('numpy','pandas','scipy','sklearn','yaml','flask','matplotlib') if not importlib.util.find_spec(x)]; print('  xx  missing: '+', '.join(m)) if m else print('  ok  core packages import cleanly'); sys.exit(1 if m else 0)"
+"%VPY%" -c "import numpy, pandas, scipy, sklearn, yaml, flask, matplotlib; print('  ok  core packages import cleanly')" 2>nul
 if errorlevel 1 (
-  echo   xx  the install is incomplete - see the messages above
+  echo   xx  the install is incomplete
   pause
   exit /b 1
 )

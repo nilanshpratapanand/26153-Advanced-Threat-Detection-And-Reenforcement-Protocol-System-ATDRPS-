@@ -78,8 +78,12 @@ say "installing requirements"
 if "$VPY" -m pip install --quiet -r requirements.txt; then
   ok "core requirements installed"
 else
-  warn "pip could not install everything from requirements.txt"
-  warn "if this machine is offline, see the note at the end"
+  warn "pip could not download packages. Recreating venv with system site packages..."
+  rm -rf "$VENV"
+  "$PY" -m venv "$VENV" --system-site-packages 2>/dev/null || die \
+    "could not create .venv. On Debian/Ubuntu: sudo apt install python3-venv"
+  VPY="$VENV/bin/python"
+  ok "venv created with system site packages"
 fi
 
 if [ -n "$WANT_TORCH" ]; then
@@ -93,27 +97,11 @@ fi
 
 # ------------------------------------------------------------- self-check
 say "checking the install"
-"$VPY" - <<'PYEOF'
-import importlib, sys
-missing = []
-for mod in ("numpy", "pandas", "scipy", "sklearn", "yaml", "flask", "matplotlib"):
-    try:
-        importlib.import_module(mod)
-    except ImportError:
-        missing.append(mod)
-if missing:
-    print("  \033[31mxx\033[0m  missing: " + ", ".join(missing))
-    sys.exit(1)
-print("  \033[32mok\033[0m  core packages import cleanly")
-try:
-    import torch
-    dev = "CUDA" if torch.cuda.is_available() else "CPU"
-    print(f"  \033[32mok\033[0m  PyTorch {torch.__version__} ({dev}) - transformer backend available")
-except ImportError:
-    print("  \033[33m!!\033[0m  PyTorch not installed - the numpy backend will be used")
-    print("      to add it later:  ./install.sh --torch")
-PYEOF
-[ $? -eq 0 ] || die "the install is incomplete - see the messages above"
+"$VPY" -c "import numpy, pandas, scipy, sklearn, yaml, flask, matplotlib; print('  \033[32mok\033[0m  core packages import cleanly')" 2>/dev/null \
+  || die "the install is incomplete - core packages missing"
+
+"$VPY" -c "import torch; dev='CUDA' if torch.cuda.is_available() else 'CPU'; print(f'  \033[32mok\033[0m  PyTorch {torch.__version__} ({dev}) - transformer backend available')" 2>/dev/null \
+  || warn "PyTorch not installed - the numpy backend will be used"
 
 # ----------------------------------------------------------------- tests
 if [ "$RUN_TESTS" -eq 1 ]; then
