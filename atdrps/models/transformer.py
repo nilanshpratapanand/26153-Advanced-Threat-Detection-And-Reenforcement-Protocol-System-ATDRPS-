@@ -3,7 +3,8 @@
 Learns ``P(S_{t+1} | S_{t-L+1..t})`` over sequences of network states, with
 three heads sharing one encoder:
 
-``next_state``      the dynamics target -- what the network will look like
+``next_state``      the dynamics target -- how the network state will *change*
+                    (a residual; see below)
 ``stage``           the MITRE ATT&CK stage of the *next* window
 ``infiltration``    probability that infiltration is underway next window
 
@@ -20,6 +21,14 @@ the past* relative to the target at ``t+1``.  A causal mask inside the context
 would throw away information the model legitimately has at inference time. The
 leakage that matters is between the context and the target, and that is
 prevented by construction -- the target window is never fed to the encoder.
+
+Residual dynamics
+-----------------
+The state head predicts ``S_{t+1} - S_t`` rather than ``S_{t+1}``. Any
+regularisation then pulls the model toward "nothing changes", which is the
+right prior for network state and is the persistence baseline; predicting the
+absolute state instead pulls it toward the *mean* state, and a roll-out that
+feeds mean states back into its own context oscillates within a few steps.
 
 The blocks are written out rather than assembled from
 ``nn.TransformerEncoderLayer`` for one reason: the problem statement makes
@@ -203,7 +212,12 @@ class TemporalTransformerWorldModel(WorldModel):
 
         self.standardiser.fit(dataset.context)
         Xc = torch.tensor(self.standardiser.transform(dataset.context), device=device)
-        Ys = torch.tensor(self.standardiser.transform(dataset.target_state), device=device)
+        # residual dynamics target
+        Ys = torch.tensor(
+            self.standardiser.transform(dataset.target_state)
+            - self.standardiser.transform(dataset.context[:, -1, :]),
+            device=device,
+        )
         Yst = torch.tensor(dataset.target_stage[:, 0], device=device, dtype=torch.long)
         Yin = torch.tensor(dataset.target_infil[:, 0], device=device, dtype=torch.float32)
         M = torch.tensor(dataset.target_mask[:, 0], device=device, dtype=torch.bool)
@@ -297,7 +311,11 @@ class TemporalTransformerWorldModel(WorldModel):
         self.net.eval()
         with torch.no_grad():
             Xc = torch.tensor(self.standardiser.transform(val_dataset.context), device=device)
-            Ys = torch.tensor(self.standardiser.transform(val_dataset.target_state), device=device)
+            Ys = torch.tensor(
+                self.standardiser.transform(val_dataset.target_state)
+                - self.standardiser.transform(val_dataset.context[:, -1, :]),
+                device=device,
+            )
             Yst = torch.tensor(val_dataset.target_stage[:, 0], device=device, dtype=torch.long)
             Yin = torch.tensor(val_dataset.target_infil[:, 0], device=device, dtype=torch.float32)
             M = torch.tensor(val_dataset.target_mask[:, 0], device=device, dtype=torch.bool)
@@ -323,10 +341,12 @@ class TemporalTransformerWorldModel(WorldModel):
         self.net.eval()
         with torch.no_grad():
             x = torch.tensor(self.standardiser.transform(arr), device=self._device())
-            state, stage_logits, infil_logit = self.net(x)
+            delta, stage_logits, infil_logit = self.net(x)
             probs = torch.softmax(stage_logits, dim=-1).cpu().numpy()
             infil = torch.sigmoid(infil_logit).cpu().numpy()
-            state = self.standardiser.inverse(state.cpu().numpy())
+            # the head predicts a change; add it back to the last observed state
+            last = x[:, -1, :].cpu().numpy()
+            state = self.standardiser.inverse(last + delta.cpu().numpy())
         return (state[0], probs[0], float(infil[0])) if single else (state, probs, infil)
 
     def predict_next(self, context: np.ndarray) -> np.ndarray:

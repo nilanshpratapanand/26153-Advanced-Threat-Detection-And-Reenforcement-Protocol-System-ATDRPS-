@@ -156,6 +156,29 @@ class TestStandardiser(unittest.TestCase):
         s2 = Standardiser.from_state_dict(s.state_dict())
         self.assertTrue(np.allclose(s.transform(X), s2.transform(X)))
 
+    def test_clamp_confines_states_to_the_observed_range(self):
+        rng = np.random.default_rng(2)
+        X = rng.normal(size=(200, 4, 3)).astype(np.float32)
+        s = Standardiser().fit(X)
+        wild = np.full((1, 3), 1e6, dtype=np.float32)
+        clamped = s.clamp(wild)
+        self.assertTrue(np.isfinite(clamped).all())
+        self.assertTrue((np.abs(clamped) < 1e3).all())
+
+    def test_clamp_leaves_ordinary_states_alone(self):
+        rng = np.random.default_rng(3)
+        X = rng.normal(size=(400, 4, 3)).astype(np.float32)
+        s = Standardiser().fit(X)
+        typical = X[0]
+        self.assertTrue(np.allclose(s.clamp(typical), typical, atol=1e-3))
+
+    def test_clamp_survives_a_state_dict_roundtrip(self):
+        X = np.random.default_rng(4).normal(size=(120, 3, 4)).astype(np.float32)
+        s = Standardiser().fit(X)
+        s2 = Standardiser.from_state_dict(s.state_dict())
+        wild = np.full((1, 4), 500.0, dtype=np.float32)
+        self.assertTrue(np.allclose(s.clamp(wild), s2.clamp(wild)))
+
     def test_use_before_fit_is_an_error(self):
         with self.assertRaises(RuntimeError):
             Standardiser().transform(np.zeros((2, 2)))
@@ -204,6 +227,17 @@ class TestNumpyWorldModel(unittest.TestCase):
         self.assertTrue(np.allclose(forecast.stage_probs.sum(axis=1), 1.0, atol=1e-4))
         self.assertEqual(len(forecast.timeline()), 4)
         self.assertIn("peak infiltration", forecast.summary())
+
+    def test_rollout_stays_inside_the_training_distribution(self):
+        """Unclamped autoregressive roll-outs leave the data distribution within
+        a few steps, and the heads then return saturated nonsense."""
+        forecast = self.model.rollout(self.test.context[0], horizon=12)
+        train_lo = self.train.context.reshape(-1, self.ds.n_features).min(axis=0)
+        train_hi = self.train.context.reshape(-1, self.ds.n_features).max(axis=0)
+        span = train_hi - train_lo + 1e-6
+        self.assertTrue((forecast.states >= train_lo - 3 * span).all())
+        self.assertTrue((forecast.states <= train_hi + 3 * span).all())
+        self.assertTrue(np.isfinite(forecast.states).all())
 
     def test_rollout_pads_a_short_context(self):
         forecast = self.model.rollout(self.test.context[0][-2:], horizon=2)

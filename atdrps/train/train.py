@@ -248,9 +248,10 @@ def write_report(payload: dict, path: str | Path) -> str:
     lines = [
         "# ATDRPS benchmark results",
         "",
-        "All models see identical sequences, an identical chronological split and "
-        "identical features. Operating thresholds are chosen on the validation "
-        "split and applied unchanged to test.",
+        "All models see identical sequences, an identical split and identical "
+        "features. Operating thresholds are chosen on the validation split and "
+        "applied unchanged to test -- tuning a threshold on the data you then "
+        "report turns a benchmark into a sales pitch.",
         "",
         "## Setup",
         "",
@@ -259,8 +260,9 @@ def write_report(payload: dict, path: str | Path) -> str:
         f"- context: **{meta['context']} windows** of {meta['window_size_s']:g}s; "
         f"forecast horizon **K = {meta['horizon']}**",
         f"- state dimension: **{meta['features']}**",
-        f"- split: {meta['split']}, with a {meta['gap']}-sample gap at each boundary "
-        "so that train and test never share a window",
+        f"- split: {meta['split']}"
+        + (f", with a {meta['gap']}-sample gap at each boundary so that train and "
+           "test never share a window" if meta.get("split_kind") == "time" else ""),
         "",
         "## Infiltration forecast, one window ahead",
         "",

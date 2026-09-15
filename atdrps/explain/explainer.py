@@ -183,9 +183,15 @@ class ForecastExplainer:
         return deltas / total if total > 0 else np.full(L, 1.0 / L)
 
     # -------------------------------------------------------------- report
-    def report(self, context: np.ndarray, forecast, summary: dict | None = None) -> dict:
-        """A complete explanation package for one forecast."""
-        stage = forecast.stage_names[0] if forecast.stage_names else None
+    def report(self, context: np.ndarray, forecast, summary: dict | None = None,
+               stage: str | None = None) -> dict:
+        """A complete explanation package for one forecast.
+
+        ``stage`` names the stage being explained; it defaults to the first
+        forecast step but callers explaining an observed window should pass
+        that window's own stage.
+        """
+        stage = stage or (forecast.stage_names[0] if forecast.stage_names else None)
         infil = self.explain(context, target="infiltration", summary=summary)
         stage_exp = self.explain(context, target="stage", stage=stage, summary=summary)
         rule_scores = score_stages(summary) if summary else {}

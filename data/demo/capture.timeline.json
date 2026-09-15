@@ -1,0 +1,111 @@
+{
+  "meta": {
+    "seed": 4242,
+    "start_ts": 1767225600.0,
+    "duration_s": 2400.0,
+    "n_packets": 79485,
+    "n_campaigns": 2,
+    "continue_probs": [
+      0.8,
+      0.8,
+      0.75,
+      0.75
+    ],
+    "internal_hosts": [
+      "10.20.1.10",
+      "10.20.3.11",
+      "10.20.3.12",
+      "10.20.2.13",
+      "10.20.0.14",
+      "10.20.0.15",
+      "10.20.2.16",
+      "10.20.0.17",
+      "10.20.3.18",
+      "10.20.1.19",
+      "10.20.0.20",
+      "10.20.0.21"
+    ],
+    "external_hosts": [
+      "93.184.33.79",
+      "93.184.240.61",
+      "93.184.234.138",
+      "93.184.238.233",
+      "93.184.7.113",
+      "93.184.137.193",
+      "93.184.186.146",
+      "93.184.167.130"
+    ],
+    "attackers": [
+      "185.11.167.209",
+      "185.240.113.232"
+    ],
+    "c2_hosts": [
+      "45.15.183.210",
+      "45.32.68.231"
+    ],
+    "resolver": "10.20.0.2",
+    "stage_counts": {
+      "Reconnaissance": 2,
+      "InitialAccess": 2,
+      "LateralMovement": 2,
+      "CommandAndControl": 0,
+      "Exfiltration": 0
+    }
+  },
+  "timeline": [
+    {
+      "start": 1767226588.3800476,
+      "end": 1767226617.7528284,
+      "stage": "Reconnaissance",
+      "attacker": "185.11.167.209",
+      "victim": "10.20.1.19",
+      "campaign": 0,
+      "note": "fast port scan"
+    },
+    {
+      "start": 1767226638.1512341,
+      "end": 1767226783.5714324,
+      "stage": "InitialAccess",
+      "attacker": "185.11.167.209",
+      "victim": "10.20.1.19",
+      "campaign": 0,
+      "note": "credential brute force"
+    },
+    {
+      "start": 1767226840.7016656,
+      "end": 1767227190.2874844,
+      "stage": "LateralMovement",
+      "attacker": "10.20.1.19",
+      "victim": "10.20.2.16,10.20.0.21,10.20.0.15,10.20.2.13",
+      "campaign": 0,
+      "note": "SMB/RDP/SSH spread"
+    },
+    {
+      "start": 1767227488.7934718,
+      "end": 1767227753.4188042,
+      "stage": "Reconnaissance",
+      "attacker": "185.240.113.232",
+      "victim": "10.20.0.14",
+      "campaign": 1,
+      "note": "slow scan"
+    },
+    {
+      "start": 1767227763.1039245,
+      "end": 1767228141.844328,
+      "stage": "InitialAccess",
+      "attacker": "185.240.113.232",
+      "victim": "10.20.0.14",
+      "campaign": 1,
+      "note": "credential brute force"
+    },
+    {
+      "start": 1767228169.79236,
+      "end": 1767228571.801344,
+      "stage": "LateralMovement",
+      "attacker": "10.20.0.14",
+      "victim": "10.20.3.12,10.20.1.19,10.20.0.21,10.20.1.10,10.20.3.18",
+      "campaign": 1,
+      "note": "SMB/RDP/SSH spread"
+    }
+  ]
+}

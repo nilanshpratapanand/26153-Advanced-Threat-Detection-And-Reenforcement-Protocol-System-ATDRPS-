@@ -14,14 +14,27 @@ installable.
 
 Structure, deliberately mirroring the transformer:
 
-* **dynamics** -- ridge regression from the flattened context to the next
-  state, learned in standardised space
+* **dynamics** -- ridge regression from the flattened context to the *change*
+  in state, learned in standardised space
 * **stage head** -- multinomial logistic regression over MITRE stages of the
   *next* window
 * **infiltration head** -- binary logistic regression
 
 Forward simulation is inherited from :class:`~atdrps.models.base.WorldModel`,
 so both backends roll out through identical code.
+
+Why the dynamics head predicts a *delta*
+----------------------------------------
+The first version regressed the absolute next state. Ridge shrinks its
+coefficients toward zero, so a strongly regularised model predicts something
+close to the *mean* state -- and feeding a mean state back into the context
+step after step produced forecasts that oscillated 1.00, 0.00, 0.00, 0.99,
+1.00 across five steps, with the stage label contradicting the probability.
+
+Predicting the change instead makes shrinkage mean "nothing changes", which is
+the correct prior for network state and is exactly the persistence baseline.
+The roll-out then degrades gracefully toward "no further change" rather than
+lurching between arbitrary points in state space.
 """
 
 from __future__ import annotations
@@ -72,14 +85,17 @@ class NumpyDynamicsWorldModel(WorldModel):
 
     # ------------------------------------------------------------ training
     def fit(self, dataset, val_dataset=None, class_weight: str | None = "balanced",
-            alphas=(0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0), verbose: bool = False,
+            alphas=(0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0),
+            logistic_Cs=(0.003, 0.01, 0.03, 0.1, 0.5), verbose: bool = False,
             **kwargs) -> "NumpyDynamicsWorldModel":
         if len(dataset) == 0:
             raise ValueError("cannot fit on an empty dataset")
 
         self.standardiser.fit(dataset.context)
         X = self._prepare(dataset.context)
-        y_state = self.standardiser.transform(dataset.target_state)
+        # residual target: how the state *changes*, not where it lands
+        last = self.standardiser.transform(dataset.context[:, -1, :])
+        y_state = self.standardiser.transform(dataset.target_state) - last
 
         # The flattened context is L x F wide -- 1536 columns at the default
         # settings -- so the ridge penalty is doing real work, not decoration.
@@ -96,25 +112,49 @@ class NumpyDynamicsWorldModel(WorldModel):
         Xh = X[mask]
 
         self._stage_classes = np.unique(stage_y)
-        if Xh.shape[0] == 0 or self._stage_classes.size < 2:
-            self.stage_clf = None
-        else:
-            self.stage_clf = LogisticRegression(
-                C=self.logistic_C, max_iter=self.max_iter,
-                class_weight=class_weight,
-            )
-            self.stage_clf.fit(Xh, stage_y)
-
-        if Xh.shape[0] and np.unique(infil_y).size == 2:
-            self.infil_clf = LogisticRegression(
-                C=self.logistic_C, max_iter=self.max_iter, class_weight=class_weight,
-            )
-            self.infil_clf.fit(Xh, infil_y)
-        else:
-            self.infil_clf = None
+        # Regularisation strength is chosen on validation log-loss, not accuracy.
+        # At C=0.5 with 1536 columns both heads returned 1.00 confidence for
+        # every window, which is not a probability, it is an assertion -- and it
+        # made the roll-out swing between extremes.
+        self.stage_clf = self._fit_head(
+            Xh, stage_y, val_dataset, "stage", logistic_Cs, class_weight, verbose
+        ) if (Xh.shape[0] and self._stage_classes.size >= 2) else None
+        self.infil_clf = self._fit_head(
+            Xh, infil_y, val_dataset, "infiltration", logistic_Cs, class_weight, verbose
+        ) if (Xh.shape[0] and np.unique(infil_y).size == 2) else None
 
         self.fitted = True
         return self
+
+    def _fit_head(self, X, y, val_dataset, kind, candidates, class_weight, verbose):
+        from sklearn.metrics import log_loss
+
+        candidates = [float(c) for c in (candidates or (self.logistic_C,))]
+        if val_dataset is None or len(val_dataset) == 0 or len(candidates) == 1:
+            model = LogisticRegression(C=candidates[0], max_iter=self.max_iter,
+                                       class_weight=class_weight)
+            model.fit(X, y)
+            return model
+
+        v_mask = val_dataset.target_mask[:, 0]
+        Xv = self._prepare(val_dataset.context)[v_mask]
+        yv = (val_dataset.target_stage if kind == "stage" else val_dataset.target_infil)
+        yv = yv[:, 0][v_mask]
+        best, best_loss = None, float("inf")
+        for C in candidates:
+            model = LogisticRegression(C=C, max_iter=self.max_iter,
+                                       class_weight=class_weight)
+            model.fit(X, y)
+            try:
+                loss = float(log_loss(yv, model.predict_proba(Xv), labels=model.classes_))
+            except ValueError:
+                continue
+            if verbose:
+                print(f"    {kind:<13} C={C:<7g} val log-loss={loss:.4f}", flush=True)
+            if loss < best_loss:
+                best, best_loss = model, loss
+        return best if best is not None else LogisticRegression(
+            C=candidates[0], max_iter=self.max_iter, class_weight=class_weight).fit(X, y)
 
     def _fit_dynamics(self, X, y_state, val_dataset, alphas, verbose):
         candidates = [float(a) for a in (alphas or (self.ridge_alpha,))]
@@ -125,7 +165,8 @@ class NumpyDynamicsWorldModel(WorldModel):
             return model
 
         Xv = self._prepare(val_dataset.context)
-        yv = self.standardiser.transform(val_dataset.target_state)
+        yv = (self.standardiser.transform(val_dataset.target_state)
+              - self.standardiser.transform(val_dataset.context[:, -1, :]))
         best, best_mse, best_alpha = None, float("inf"), candidates[0]
         for alpha in candidates:
             model = Ridge(alpha=alpha)
@@ -140,15 +181,17 @@ class NumpyDynamicsWorldModel(WorldModel):
 
     # ----------------------------------------------------------- inference
     def predict_next(self, context: np.ndarray) -> np.ndarray:
-        if self.dynamics is None:
-            raise RuntimeError("model is not fitted")
-        pred = self.dynamics.predict(self._prepare(context))
-        return self.standardiser.inverse(pred)[0].astype(np.float32)
+        return self.predict_next_batch(np.asarray(context)[None, ...])[0].astype(np.float32)
 
     def predict_next_batch(self, context: np.ndarray) -> np.ndarray:
         if self.dynamics is None:
             raise RuntimeError("model is not fitted")
-        return self.standardiser.inverse(self.dynamics.predict(self._prepare(context)))
+        arr = np.asarray(context, dtype=np.float32)
+        if arr.ndim == 2:
+            arr = arr[None, ...]
+        delta = self.dynamics.predict(self._prepare(arr))
+        last = self.standardiser.transform(arr[:, -1, :])
+        return self.standardiser.inverse(last + delta)
 
     def heads(self, context: np.ndarray) -> tuple[np.ndarray, float]:
         X = self._prepare(context)

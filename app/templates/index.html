@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATDRPS — network attack forecasting</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121820; --panel-2:#171f2a; --line:#1f2a37;
+    --ink:#e6edf3; --muted:#8b98a8; --dim:#5b6776;
+    --accent:#4da3ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+    --recon:#58a6ff; --ia:#d29922; --lm:#db6d28; --c2:#bc8cff; --exf:#f85149; --benign:#3fb950;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  a{color:var(--accent)}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 72px}
+  header{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;
+         border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
+  .logo{font-family:var(--mono);font-weight:700;font-size:22px;letter-spacing:.5px}
+  .logo span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .tag{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;
+        padding:4px 11px;font-size:12px;color:var(--muted);font-family:var(--mono)}
+  .chip.live{color:var(--ok);border-color:#1c3a24}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+         padding:18px;margin-bottom:18px}
+  .panel h2{margin:0 0 4px;font-size:15px;letter-spacing:.2px}
+  .panel .hint{color:var(--muted);font-size:12.5px;margin:0 0 14px}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+  .field{display:flex;flex-direction:column;gap:6px}
+  label{font-size:12px;color:var(--muted);font-family:var(--mono)}
+  input[type=file]{color:var(--muted);font-size:13px}
+  input[type=number]{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);
+                     border-radius:6px;padding:7px 9px;width:110px;font-family:var(--mono)}
+  button{background:var(--accent);color:#04101f;border:0;border-radius:6px;font-weight:650;
+         padding:9px 18px;cursor:pointer;font-size:13.5px}
+  button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  .headline{font-size:17px;font-weight:600;margin:0 0 6px}
+  .meta{color:var(--muted);font-size:12.5px;font-family:var(--mono)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
+  .scroll{overflow-x:auto}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;
+         font-family:var(--mono);border:1px solid transparent}
+  .b-Benign{color:var(--benign);border-color:#1c3a24;background:#0f1f14}
+  .b-Reconnaissance{color:var(--recon);border-color:#17324f;background:#0d1a29}
+  .b-InitialAccess{color:var(--ia);border-color:#4a3a10;background:#221a08}
+  .b-LateralMovement{color:var(--lm);border-color:#4d2c12;background:#241408}
+  .b-CommandAndControl{color:var(--c2);border-color:#3c2b57;background:#1b1329}
+  .b-Exfiltration{color:var(--bad);border-color:#5a1d1a;background:#2a0f0e}
+  .bar{position:relative;height:16px;background:var(--panel-2);border-radius:3px;overflow:hidden;min-width:120px}
+  .bar > i{position:absolute;inset:0 auto 0 0;display:block;border-radius:3px}
+  .driver{display:grid;grid-template-columns:1fr 150px 74px;gap:10px;align-items:center;
+          padding:5px 0;border-bottom:1px solid var(--line)}
+  .driver .name{font-size:12.5px}
+  .driver .val{font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted)}
+  .up{background:var(--bad)} .down{background:var(--ok)}
+  .err{border-color:#5a1d1a;background:#1c1010;color:#ffb4ae}
+  .hidden{display:none}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);
+           border-radius:50%;display:inline-block;animation:spin .8s linear infinite;vertical-align:-2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  ul.notes{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:12.5px}
+  .foot{color:var(--dim);font-size:12px;margin-top:26px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="logo">ATD<span>RPS</span></div>
+      <div class="sub">Advanced Threat Detection and Reinforcement Protocol System &middot;
+        world-model network attack forecasting</div>
+      <div class="sub">SIH 2026 &middot; PS 26153 &middot; NTRO &middot; Team Bell Labs</div>
+    </div>
+    <div class="tag">
+      <span class="chip live">fully offline</span>
+      <span class="chip">{{ window_size }}s windows</span>
+      <span class="chip">K = {{ horizon }}</span>
+      <span class="chip" id="modelChip">model: loading…</span>
+    </div>
+  </header>
+
+  {% if not ready %}
+  <div class="panel err">
+    <h2>No model loaded</h2>
+    <p class="hint" style="color:inherit">{{ message }}</p>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Analyse a capture</h2>
+    <p class="hint">Accepts a PCAP/PCAPNG capture or a flow CSV (CIC-IDS2018, CIC-IDS2017,
+      UNSW-NB15, CTU-13). Nothing leaves this machine.</p>
+    <form id="form">
+      <div class="row">
+        <div class="field">
+          <label for="capture">capture file</label>
+          <input id="capture" name="capture" type="file"
+                 accept=".pcap,.pcapng,.cap,.dmp,.csv" required>
+        </div>
+        <div class="field">
+          <label for="threshold">alert threshold</label>
+          <input id="threshold" name="threshold" type="number" step="0.05" min="0" max="1" value="0.5">
+        </div>
+        <div class="field">
+          <label for="horizon">horizon K</label>
+          <input id="horizon" name="horizon" type="number" min="1" max="20" value="{{ horizon }}">
+        </div>
+        <button id="go" type="submit" {% if not ready %}disabled{% endif %}>Forecast</button>
+        <button id="demo" type="button" class="ghost">What am I looking at?</button>
+      </div>
+    </form>
+    <div id="status" class="meta" style="margin-top:12px"></div>
+  </div>
+
+  <div id="about" class="panel hidden">
+    <h2>What this is doing</h2>
+    <p class="hint">A conventional IDS labels each flow benign or malicious. ATDRPS instead
+      groups traffic into fixed time windows, encodes each window as a 96-dimensional network
+      <em>state</em>, and learns how those states evolve. It then rolls that model forward K
+      steps to estimate whether the network is heading toward compromise, maps the predicted
+      state to a MITRE ATT&amp;CK stage, and reports the measurements that drove the call.</p>
+    <div class="legend">
+      {% for name, tactic in stages %}
+      <span class="badge b-{{ name }}">{{ name }} · {{ tactic }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="panel">
+      <h2 id="headline" class="headline"></h2>
+      <div id="meta" class="meta"></div>
+      <ul id="notes" class="notes"></ul>
+    </div>
+
+    <div class="panel">
+      <h2>Infiltration probability over time</h2>
+      <p class="hint">One-step-ahead probability for every window, then the K-step forward
+        simulation (hatched) from the end of the capture. The dashed line is the alert
+        threshold.</p>
+      <div id="chart"></div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Forward simulation</h2>
+        <p class="hint">Autoregressive roll-out. Confidence decays with distance — as it should.</p>
+        <div class="scroll"><table id="forecastTable"></table></div>
+        <div class="meta" id="forecastNote" style="margin-top:10px;color:#d29922"></div>
+      </div>
+      <div class="panel">
+        <h2>Why</h2>
+        <p class="hint" id="whyHint"></p>
+        <div id="drivers"></div>
+        <div id="ruleBox" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Flows inside the peak window</h2>
+      <p class="hint">The conversations behind the highest-risk window, ranked by how much
+        each contributes to that judgement.</p>
+      <div class="scroll"><table id="flowTable"></table></div>
+    </div>
+  </div>
+
+  <div class="foot">ATDRPS runs entirely on this machine — no cloud APIs, no telemetry.</div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const STAGES = ["Benign","Reconnaissance","InitialAccess","LateralMovement","CommandAndControl","Exfiltration"];
+const STAGE_COLOR = {Benign:"#3fb950",Reconnaissance:"#58a6ff",InitialAccess:"#d29922",
+  LateralMovement:"#db6d28",CommandAndControl:"#bc8cff",Exfiltration:"#f85149"};
+
+fetch("/api/health").then(r=>r.json()).then(d=>{
+  $("#modelChip").textContent = d.ok ? `model: ${d.model}` : "model: none";
+}).catch(()=>{ $("#modelChip").textContent = "model: unavailable"; });
+
+$("#demo").addEventListener("click", () => $("#about").classList.toggle("hidden"));
+
+$("#form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const file = $("#capture").files[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("capture", file);
+  body.append("threshold", $("#threshold").value);
+  body.append("horizon", $("#horizon").value);
+  $("#go").disabled = true;
+  $("#status").innerHTML = `<span class="spinner"></span> parsing ${file.name} ` +
+    `(${(file.size/1e6).toFixed(1)} MB), assembling flows, windowing, forecasting…`;
+  try {
+    const res = await fetch("/api/analyse", {method:"POST", body});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "analysis failed");
+    render(data);
+    $("#status").textContent = "";
+  } catch (err) {
+    $("#status").innerHTML = `<span style="color:#f85149">${err.message}</span>`;
+    $("#results").classList.add("hidden");
+  } finally {
+    $("#go").disabled = false;
+  }
+});
+
+function render(d){
+  $("#results").classList.remove("hidden");
+  $("#headline").textContent = d.headline;
+  $("#meta").textContent =
+    `${d.source} · ${d.source_kind} · ${d.n_flows} flows · ${d.n_windows} windows of ${d.window_size_s}s`;
+  const notes = $("#notes"); notes.innerHTML = "";
+  (d.notes||[]).forEach(n => { const li=document.createElement("li"); li.textContent=n; notes.appendChild(li); });
+
+  drawChart(d);
+  drawForecast(d);
+  drawDrivers(d);
+  drawFlows(d);
+}
+
+function drawChart(d){
+  const obs = d.timeline, fc = d.forecast || [];
+  const n = obs.length + fc.length;
+  const W = 1080, H = 250, padL = 46, padR = 14, padT = 14, padB = 34;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const x = i => padL + (n<=1 ? iw/2 : i * iw/(n-1));
+  const y = v => padT + ih * (1 - v);
+  const thr = parseFloat($("#threshold").value) || 0.5;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
+    aria-label="infiltration probability over time">`;
+  svg += `<defs><pattern id="hatch" width="6" height="6" patternTransform="rotate(45)"
+    patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="0" y2="6"
+    stroke="#4da3ff" stroke-width="2" opacity=".35"/></pattern></defs>`;
+
+  for (let g=0; g<=4; g++){
+    const v=g/4, yy=y(v);
+    svg += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="#1f2a37"/>`;
+    svg += `<text x="${padL-8}" y="${yy+4}" fill="#5b6776" font-size="11"
+      text-anchor="end" font-family="ui-monospace,monospace">${v.toFixed(2)}</text>`;
+  }
+  if (fc.length){
+    svg += `<rect x="${x(obs.length-0.5)}" y="${padT}" width="${x(n-1)-x(obs.length-0.5)}"
+      height="${ih}" fill="url(#hatch)" opacity=".5"/>`;
+  }
+
+  // stage ribbon
+  obs.forEach((r,i)=>{
+    const w = Math.max(1, iw/(n-1));
+    svg += `<rect x="${x(i)-w/2}" y="${H-padB+6}" width="${w}" height="7"
+      fill="${STAGE_COLOR[r.stage]||"#3fb950"}" opacity=".85"/>`;
+  });
+  fc.forEach((r,i)=>{
+    const j = obs.length+i, w = Math.max(1, iw/(n-1));
+    svg += `<rect x="${x(j)-w/2}" y="${H-padB+6}" width="${w}" height="7"
+      fill="${STAGE_COLOR[r.stage]||"#3fb950"}" opacity=".5"/>`;
+  });
+
+  const pts = obs.map((r,i)=>`${x(i)},${y(r.infiltration_probability)}`).join(" ");
+  svg += `<polyline points="${pts}" fill="none" stroke="#4da3ff" stroke-width="2"/>`;
+  if (fc.length){
+    const start = `${x(obs.length-1)},${y(obs[obs.length-1].infiltration_probability)}`;
+    const fpts = fc.map((r,i)=>`${x(obs.length+i)},${y(r.infiltration_probability)}`).join(" ");
+    svg += `<polyline points="${start} ${fpts}" fill="none" stroke="#4da3ff"
+      stroke-width="2" stroke-dasharray="5 4" opacity=".85"/>`;
+  }
+  svg += `<line x1="${padL}" y1="${y(thr)}" x2="${W-padR}" y2="${y(thr)}"
+    stroke="#f85149" stroke-dasharray="4 4" opacity=".8"/>`;
+
+  const peak = d.peak_window;
+  if (peak >= 0 && obs[peak]){
+    svg += `<circle cx="${x(peak)}" cy="${y(obs[peak].infiltration_probability)}" r="4"
+      fill="#f85149"/>`;
+  }
+  svg += `<text x="${padL}" y="${H-6}" fill="#5b6776" font-size="11"
+    font-family="ui-monospace,monospace">observed windows</text>`;
+  if (fc.length){
+    svg += `<text x="${W-padR}" y="${H-6}" fill="#5b6776" font-size="11" text-anchor="end"
+      font-family="ui-monospace,monospace">forecast +${fc.length}</text>`;
+  }
+  svg += `</svg>`;
+  $("#chart").innerHTML = svg;
+}
+
+// Infiltration is defined as InitialAccess onward, so "Reconnaissance" with a
+// low infiltration probability is coherent, not a contradiction. A genuine
+// disagreement is the two heads pointing opposite ways, and it is worth
+// showing rather than hiding: they are trained on different objectives and an
+// analyst should know when they diverge.
+const INFIL_STAGES = new Set(["InitialAccess","LateralMovement","CommandAndControl","Exfiltration"]);
+
+function drawForecast(d){
+  const rows = d.forecast || [];
+  const thr = parseFloat($("#threshold").value) || 0.5;
+  let html = `<tr><th>step</th><th>p(infiltration)</th><th></th><th>stage</th><th>conf</th></tr>`;
+  let disagreements = 0;
+  rows.forEach(r=>{
+    const pct = (r.infiltration_probability*100).toFixed(0);
+    const saysInfil = r.infiltration_probability >= thr;
+    const stageInfil = INFIL_STAGES.has(r.stage);
+    const split = saysInfil !== stageInfil;
+    if (split) disagreements++;
+    html += `<tr><td>+${r.step}</td><td>${r.infiltration_probability.toFixed(3)}</td>
+      <td><div class="bar"><i class="up" style="width:${pct}%"></i></div></td>
+      <td><span class="badge b-${r.stage}">${r.stage}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</td>
+      <td>${r.stage_confidence.toFixed(2)}</td></tr>`;
+  });
+  $("#forecastTable").innerHTML = html;
+  const note = $("#forecastNote");
+  note.textContent = disagreements
+    ? `\u26a0 ${disagreements} step(s) where the infiltration head and the stage head disagree. ` +
+      `They are separate objectives; divergence means low confidence, not a bug.`
+    : "";
+}
+
+function drawDrivers(d){
+  const e = d.explanation;
+  const box = $("#drivers");
+  if (!e){
+    $("#whyHint").textContent = "Explanations need a background distribution; " +
+      "train with `atdrps benchmark` so background.npy is written next to the model.";
+    box.innerHTML = ""; $("#ruleBox").innerHTML = ""; return;
+  }
+  $("#whyHint").innerHTML =
+    `Shapley attribution for the peak window: <strong>${e.prediction.toFixed(3)}</strong> ` +
+    `against a typical window's <strong>${e.base_value.toFixed(3)}</strong>. ` +
+    `Predicted stage: <span class="badge b-${e.stage}">${e.stage}</span>`;
+  const max = Math.max(...e.drivers.map(x=>Math.abs(x.contribution)), 1e-9);
+  box.innerHTML = e.drivers.map(x=>{
+    const w = Math.abs(x.contribution)/max*100;
+    const cls = x.contribution > 0 ? "up" : "down";
+    return `<div class="driver">
+      <div class="name">${x.description}</div>
+      <div class="bar"><i class="${cls}" style="width:${w}%"></i></div>
+      <div class="val">${x.contribution>0?"+":""}${x.contribution.toFixed(3)}</div>
+    </div>`;
+  }).join("");
+
+  const kw = (e.key_windows||[]).map(w=>`${w.windows_ago} window(s) ago (${w.weight.toFixed(2)})`);
+  let extra = `<div class="meta">Most influential time steps via ${e.temporal_source}: ${kw.join(", ")}</div>`;
+  if (e.rules && e.rules.length){
+    extra += `<div class="meta" style="margin-top:8px">Interpretable rules that agree:</div>
+      <ul class="notes">${e.rules.map(r=>`<li>${r}</li>`).join("")}</ul>`;
+  }
+  extra += `<div class="meta" style="margin-top:8px;color:#5b6776">
+    attribution efficiency error ${e.efficiency_error.toExponential(1)}
+    (Shapley values sum to the prediction gap)</div>`;
+  $("#ruleBox").innerHTML = extra;
+}
+
+function drawFlows(d){
+  const rows = d.flagged_flows || [];
+  let html = `<tr><th>source</th><th>destination</th><th>proto</th><th>pkts</th>
+    <th>bytes</th><th>dur (s)</th><th>flags</th><th>no-payload</th><th>retx</th></tr>`;
+  rows.forEach(f=>{
+    html += `<tr><td>${f.src}</td><td>${f.dst}</td><td>${f.protocol}</td>
+      <td>${f.packets}</td><td>${f.bytes.toLocaleString()}</td><td>${f.duration}</td>
+      <td>${f.flags}</td><td>${f.payload_zero_ratio}</td><td>${f.retransmissions}</td></tr>`;
+  });
+  $("#flowTable").innerHTML = rows.length ? html :
+    `<tr><td class="meta">no flows recorded for that window</td></tr>`;
+}
+</script>
+</body>
+</html>

@@ -83,13 +83,30 @@ class Standardiser:
     def __init__(self) -> None:
         self.mean: np.ndarray | None = None
         self.scale: np.ndarray | None = None
+        # plausible range per feature, in standardised units, used to keep
+        # autoregressive roll-outs inside the region the model was trained on
+        self.lo: np.ndarray | None = None
+        self.hi: np.ndarray | None = None
 
     def fit(self, X: np.ndarray) -> "Standardiser":
         flat = X.reshape(-1, X.shape[-1]).astype(np.float64)
         self.mean = flat.mean(axis=0)
         std = flat.std(axis=0)
         self.scale = np.where(std < 1e-8, 1.0, std)
+        z = (flat - self.mean) / self.scale
+        # 0.5/99.5 percentiles, widened a little: generous enough not to clip
+        # real behaviour, tight enough to stop a roll-out running away
+        self.lo = np.percentile(z, 0.5, axis=0) - 1.0
+        self.hi = np.percentile(z, 99.5, axis=0) + 1.0
         return self
+
+    def clamp(self, X: np.ndarray) -> np.ndarray:
+        """Pull a state back into the range the training data actually covered."""
+        if self.lo is None or self.hi is None:
+            return X
+        z = (np.asarray(X, dtype=np.float64) - self.mean) / self.scale
+        z = np.clip(z, self.lo, self.hi)
+        return (z * self.scale + self.mean).astype(np.float32)
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         if self.mean is None:
@@ -105,13 +122,20 @@ class Standardiser:
         return self.fit(X).transform(X)
 
     def state_dict(self) -> dict:
-        return {"mean": self.mean.tolist(), "scale": self.scale.tolist()}
+        return {
+            "mean": self.mean.tolist(), "scale": self.scale.tolist(),
+            "lo": None if self.lo is None else self.lo.tolist(),
+            "hi": None if self.hi is None else self.hi.tolist(),
+        }
 
     @classmethod
     def from_state_dict(cls, data: dict) -> "Standardiser":
         obj = cls()
         obj.mean = np.asarray(data["mean"], dtype=np.float64)
         obj.scale = np.asarray(data["scale"], dtype=np.float64)
+        if data.get("lo") is not None:
+            obj.lo = np.asarray(data["lo"], dtype=np.float64)
+            obj.hi = np.asarray(data["hi"], dtype=np.float64)
         return obj
 
 
@@ -164,6 +188,14 @@ class WorldModel(ABC):
         Errors compound -- that is inherent to forward simulation and is the
         honest behaviour; a model that stayed equally confident at step 5 as at
         step 1 would be lying about what it knows.
+
+        Predicted states are clamped to the range the training data covered.
+        Without it the roll-out leaves the data distribution within two or three
+        steps and the heads, evaluated on states no network ever produced,
+        return saturated nonsense -- the first version of this oscillated
+        1.00, 0.00, 0.00, 0.07, 1.00 across five steps. Clamping is not
+        cosmetic smoothing: it confines the simulation to states the model has
+        any basis for an opinion about.
         """
         horizon = int(horizon or self.horizon)
         window = np.asarray(context, dtype=np.float32).copy()
@@ -184,7 +216,7 @@ class WorldModel(ABC):
             probs, infil = self.heads(window)
             stage_probs[k] = probs
             infiltration[k] = infil
-            nxt = self.predict_next(window)
+            nxt = self.standardiser.clamp(self.predict_next(window))
             states[k] = nxt
             window = np.concatenate([window[1:], nxt.reshape(1, -1)], axis=0)
 

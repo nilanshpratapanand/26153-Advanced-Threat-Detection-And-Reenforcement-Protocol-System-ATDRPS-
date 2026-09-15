@@ -416,7 +416,11 @@ def generate_capture(
     # contains almost no positives and every metric computed on it is noise.
     # A campaign that starts late simply runs out of capture, which is also
     # what happens in real collection.
-    starts = np.sort(rng.uniform(start_ts + 60, start_ts + duration_s * 0.80, size=n_campaigns))
+    # A very short capture has no room for a 60-second lead-in; clamp rather
+    # than let numpy raise on an inverted range.
+    first_start = start_ts + min(60.0, duration_s * 0.05)
+    last_start = max(first_start + 1e-3, start_ts + duration_s * 0.80)
+    starts = np.sort(rng.uniform(first_start, last_start, size=n_campaigns))
     p_access, p_lateral, p_c2, p_exfil = continue_probs
 
     for c, camp_start in enumerate(starts):
@@ -460,7 +464,23 @@ def generate_capture(
         timeline.append(StageInterval(t, t_ex_end, "Exfiltration", c2_hosts[c], victim, c,
                                       "bulk outbound transfer"))
 
-    packets = sorted(g.packets, key=lambda p: p.ts)
+    # Collection stops when the capture window ends, so anything a campaign
+    # would have done afterwards simply is not in the file -- and a stage that
+    # was still running is truncated, not recorded in full. Without this a
+    # capture asked for as 60 seconds could span twenty minutes, and
+    # duration_s would mean nothing.
+    packets = sorted((p for p in g.packets if start_ts <= p.ts <= t_end),
+                     key=lambda p: p.ts)
+    clipped: list[StageInterval] = []
+    for iv in timeline:
+        if iv.start > t_end:
+            continue
+        clipped.append(StageInterval(
+            start=iv.start, end=min(iv.end, t_end), stage=iv.stage,
+            attacker=iv.attacker, victim=iv.victim, campaign=iv.campaign,
+            note=iv.note + (" (truncated by end of capture)" if iv.end > t_end else ""),
+        ))
+    timeline = clipped
     meta = {
         "seed": seed,
         "start_ts": start_ts,
