@@ -248,7 +248,7 @@ def _recon_scan(g: _Gen, t0: float, attacker: str, victim: str, slow: bool) -> f
     n_ports = int(g.rng.integers(60, 260))
     # fast scan spans seconds-to-a-minute; slow scan spans several minutes, so
     # both straddle window boundaries and are visible as a trajectory
-    gap = float(g.rng.uniform(0.6, 2.4)) if slow else float(g.rng.uniform(0.02, 0.18))
+    gap = float(g.rng.uniform(1.0, 4.0)) if slow else float(g.rng.uniform(0.15, 0.9))
     open_ports = set(g.rng.choice(WELL_KNOWN, size=3, replace=False).tolist())
     t = t0
     for _ in range(n_ports):
@@ -287,7 +287,9 @@ def _initial_access(g: _Gen, t0: float, attacker: str, victim: str) -> float:
             g.teardown(t, attacker, victim, sport, service)
         else:
             g.emit(t, victim, attacker, service, sport, flags=TCP_RST | TCP_ACK, window=0)
-        t += float(g.rng.uniform(0.1, 0.9))
+        # paced to stay under lockout thresholds, so the campaign spans minutes
+        # rather than seconds -- and therefore spans many state windows
+        t += float(g.rng.uniform(1.0, 9.0))
     return t
 
 
@@ -314,7 +316,8 @@ def _lateral_movement(g: _Gen, t0: float, foothold: str, targets: list[str]) -> 
                    payload=int(g.rng.integers(60, 900)))
             t += float(g.rng.uniform(0.004, 0.06))
         g.teardown(t, foothold, target, sport, service)
-        t += float(g.rng.uniform(1.0, 12.0))
+        # operators dwell on a host before pivoting to the next
+        t += float(g.rng.uniform(20.0, 120.0))
     return t
 
 
@@ -365,12 +368,12 @@ def _exfiltration(g: _Gen, t0: float, victim: str, sink: str) -> float:
             sent += size
             # throttled: a competent operator paces exfiltration to stay under
             # volumetric alarms, which also makes it span several windows
-            t += float(g.rng.uniform(0.002, 0.020))
+            t += float(g.rng.uniform(0.006, 0.050))
             if g.rng.random() < 0.05:
                 g.emit(t, sink, victim, port, sport, flags=TCP_ACK, window=65535)
                 t += 0.0002
         g.teardown(t, victim, sink, sport, port)
-        t += float(g.rng.uniform(0.5, 5.0))
+        t += float(g.rng.uniform(5.0, 40.0))
     return t
 
 
@@ -407,8 +410,13 @@ def generate_capture(
     _background(g, start_ts, t_end, internal, externals, resolver, background_intensity)
 
     timeline: list[StageInterval] = []
-    # campaigns start early enough that a full five-stage chain still fits
-    starts = np.sort(rng.uniform(start_ts + 60, start_ts + duration_s * 0.35, size=n_campaigns))
+    # Campaigns start throughout the capture, not only in the first third.
+    # Clustering them early makes any chronological split degenerate: the tail
+    # of every capture is then pure background, so a held-out final slice
+    # contains almost no positives and every metric computed on it is noise.
+    # A campaign that starts late simply runs out of capture, which is also
+    # what happens in real collection.
+    starts = np.sort(rng.uniform(start_ts + 60, start_ts + duration_s * 0.80, size=n_campaigns))
     p_access, p_lateral, p_c2, p_exfil = continue_probs
 
     for c, camp_start in enumerate(starts):
@@ -431,7 +439,7 @@ def generate_capture(
             continue
 
         peers = [h for h in internal if h != victim]
-        targets = [str(x) for x in rng.choice(peers, size=int(rng.integers(2, 5)), replace=False)]
+        targets = [str(x) for x in rng.choice(peers, size=int(rng.integers(3, 7)), replace=False)]
         t = t_ia_end + float(rng.uniform(10, 90))
         t_lm_end = _lateral_movement(g, t, victim, targets)
         timeline.append(StageInterval(t, t_lm_end, "LateralMovement", victim, ",".join(targets), c,
