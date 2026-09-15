@@ -183,6 +183,22 @@ def _agg(values: np.ndarray) -> tuple[float, float, float]:
     return float(finite.mean()), float(finite.std()), float(finite.max())
 
 
+# A command-and-control implant checks in on a timer measured in seconds to
+# minutes -- Cobalt Strike's default is 60s with jitter, and the slow implants
+# that matter operationally are slower still. Nothing legitimate *or* malicious
+# "beacons" every two milliseconds: at that rate it is a flood or a port scan.
+#
+# This floor is not cosmetic. Without it an nmap -T4 scan, which emits probes at
+# an almost perfectly constant ~2.4ms interval, scores a regularity of 1.00 and
+# trips the C2 beacon rule -- and because beacon regularity is measured over the
+# history window, not just the current one, a 2.4-second scan went on poisoning
+# the C2 score for the following ten minutes. That was found by running an
+# nmap-faithful capture through the trained model and asking why windows with no
+# attack traffic in them were being CONFIRMED as command-and-control.
+_MIN_BEACON_INTERVAL_S = 1.0
+_MIN_BEACON_SPAN_S = 10.0
+
+
 def _beacon_regularity(starts_by_triple: dict[tuple, list[float]]) -> tuple[float, int]:
     """How metronomic is the most regular repeated contact in this window?
 
@@ -191,17 +207,25 @@ def _beacon_regularity(starts_by_triple: dict[tuple, list[float]]) -> tuple[floa
     ``[0, 1]``.  A human clicking around produces bursty, high-variance gaps;
     an implant on a timer does not.  Returns the best regularity and how many
     flows that triple contributed.
+
+    Contacts faster than :data:`_MIN_BEACON_INTERVAL_S` on average, or spanning
+    less than :data:`_MIN_BEACON_SPAN_S` in total, are not beaconing by
+    definition and are skipped -- see the note above.
     """
     best, best_count = 0.0, 0
     for starts in starts_by_triple.values():
         if len(starts) < 4:
             continue
-        gaps = np.diff(np.sort(np.asarray(starts, dtype=float)))
+        ordered = np.sort(np.asarray(starts, dtype=float))
+        span = float(ordered[-1] - ordered[0])
+        if span < _MIN_BEACON_SPAN_S:
+            continue
+        gaps = np.diff(ordered)
         gaps = gaps[gaps > 0]
         if gaps.size < 3:
             continue
         mean = float(gaps.mean())
-        if mean <= 0:
+        if mean < _MIN_BEACON_INTERVAL_S:
             continue
         cv = float(gaps.std() / mean)
         regularity = 1.0 / (1.0 + cv)

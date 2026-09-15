@@ -36,6 +36,7 @@ from ..data.schema import STAGES, flags_to_str
 from ..data.windows import build_windows
 from ..explain.explainer import ForecastExplainer
 from ..models.base import Forecast
+from .scoring import ScoringPolicy, score_timeline
 
 __all__ = ["AnalysisResult", "ThreatForecastEngine", "load_capture", "serialise_result"]
 
@@ -73,30 +74,72 @@ class AnalysisResult:
     n_windows: int = 0
     n_flows: int = 0
     notes: list[str] = field(default_factory=list)
+    verdicts: list[dict] = field(default_factory=list)
 
     @property
     def peak_risk(self) -> float:
+        """Highest *credible* risk -- the damped score, not the raw probability.
+
+        Reporting the raw maximum is how an uncorroborated forecast ends up as
+        the headline: an nmap scan with nothing after it produced "peak
+        infiltration probability 1.00 (stage: LateralMovement)" on a capture
+        whose only attack was the scan.
+        """
+        return max((row.get("risk", row["infiltration_probability"])
+                    for row in self.timeline), default=0.0)
+
+    @property
+    def raw_peak_probability(self) -> float:
+        """The undamped model maximum, kept for benchmarking and transparency."""
         return max((row["infiltration_probability"] for row in self.timeline), default=0.0)
 
+    @property
+    def confirmed(self) -> list[dict]:
+        return [r for r in self.timeline if r.get("level") == "CONFIRMED"]
+
+    @property
+    def predicted(self) -> list[dict]:
+        return [r for r in self.timeline if r.get("level") == "PREDICTED"]
+
     def headline(self) -> str:
+        """One line that distinguishes what is seen from what is expected."""
         if not self.timeline:
             return "not enough traffic to forecast"
-        stage = self.timeline[self.peak_window]["stage"] if self.peak_window >= 0 else "Benign"
+
+        confirmed, predicted = self.confirmed, self.predicted
+        if confirmed:
+            top = max(confirmed, key=lambda r: r.get("risk", 0.0))
+            head = (f"CONFIRMED {top['stage']} in window {top['window']} "
+                    f"at {top.get('risk', 0.0):.2f} "
+                    f"(corroborated by {top.get('observed_score', 0.0):.2f} rule evidence)")
+        elif predicted:
+            top = max(predicted, key=lambda r: r.get("risk", 0.0))
+            head = (f"PREDICTED {top['stage']} at {top.get('risk', 0.0):.2f} "
+                    f"-- forecast only, no corroborating evidence in the capture yet")
+        else:
+            head = f"no confirmed intrusion; peak credible risk {self.peak_risk:.2f}"
+
+        extra = ""
+        if confirmed and predicted:
+            nxt = max(predicted, key=lambda r: r.get("risk", 0.0))
+            extra = f"; model forecasts {nxt['stage']} next (not yet corroborated)"
         forward = (f"; forward simulation peaks at {self.forecast.peak_infiltration:.2f} "
                    f"in {self.forecast.peak_step} window(s)") if self.forecast else ""
-        return (f"peak infiltration probability {self.peak_risk:.2f} "
-                f"(stage: {stage}){forward}")
+        return head + extra + forward
 
 
 class ThreatForecastEngine:
     def __init__(self, model, explainer: ForecastExplainer | None = None,
                  window_size_s: float = 30.0, history_s: float = 600.0,
-                 threshold: float = 0.5) -> None:
+                 threshold: float = 0.5,
+                 policy: ScoringPolicy | None = None) -> None:
         self.model = model
         self.explainer = explainer
         self.window_size_s = float(window_size_s)
         self.history_s = float(history_s)
         self.threshold = float(threshold)
+        # dual-track scoring: see atdrps/engine/scoring.py for why
+        self.policy = (policy or ScoringPolicy()).validate()
 
     # -------------------------------------------------------------- loading
     @classmethod
@@ -170,7 +213,30 @@ class ThreatForecastEngine:
                 "alert": bool(infil[i] >= self.threshold),
             })
 
-        peak = int(np.argmax([row["infiltration_probability"] for row in result.timeline]))
+        # --- dual-track grading -------------------------------------------
+        # The rule engine reads this window's real features; the model forecasts
+        # the next one. Grading them against each other is what stops a single
+        # scan from producing eight minutes of phantom kill-chain alerts.
+        verdicts = score_timeline(result.timeline, states, self.policy)
+        by_window = {v.window: v for v in verdicts}
+        for row in result.timeline:
+            v = by_window.get(int(row["window"]))
+            if v is None:
+                continue
+            row["level"] = v.level
+            row["risk"] = v.risk
+            row["observed_score"] = v.observed_score
+            row["observed_stage"] = v.observed_stage
+            row["corroborated"] = v.corroborated
+            row["reasons"] = v.reasons
+            # an alert now requires the two tracks to agree, not just a high
+            # forecast -- PREDICTED still surfaces, but as a forecast, not a fact
+            row["alert"] = v.level == "CONFIRMED"
+        result.verdicts = [v.to_dict() for v in verdicts]
+
+        # peak = most *credible* window, not merely the highest raw probability
+        peak = int(np.argmax([row.get("risk", row["infiltration_probability"])
+                              for row in result.timeline]))
         result.peak_window = peak
         peak_window_index = result.timeline[peak]["window"]
 

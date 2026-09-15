@@ -41,6 +41,7 @@ import numpy as np
 from .schema import BENIGN_STAGE, DEFAULT_INFILTRATION_STAGES, STAGES
 
 __all__ = [
+    "_rule_support",
     "OUT_OF_SCOPE", "MITRE_TACTICS", "STAGE_TECHNIQUES", "LABEL_PATTERNS",
     "stage_from_label", "describe_stage", "score_stages", "RULES",
 ]
@@ -185,7 +186,7 @@ RULES: tuple[tuple[str, str, str, float, float, str], ...] = (
     ("LateralMovement", "mean_retransmission_ratio", ">", 0.02, 0.6, "retransmissions typical of pushed tooling"),
 
     # ---- Command and Control: low-volume, regular, long-lived outbound
-    ("CommandAndControl", "beacon_regularity", ">", 0.75, 2.0, "near-constant interval between outbound contacts"),
+    ("CommandAndControl", "beacon_regularity", ">", 0.88, 2.0, "near-constant interval between outbound contacts"),
     ("CommandAndControl", "mean_flow_bytes", "<", 6000, 0.8, "each contact moves very little data"),
     ("CommandAndControl", "external_flow_share", ">", 0.4, 0.7, "destination is outside the network"),
     ("CommandAndControl", "repeat_external_dst_count", ">", 3, 1.2, "the same external host contacted repeatedly"),
@@ -204,7 +205,36 @@ RULES: tuple[tuple[str, str, str, float, float, str], ...] = (
 )
 
 
-def score_stages(window: dict[str, float]) -> dict[str, float]:
+def _rule_support(value: float, op: str, threshold: float, band: float = 0.18) -> float:
+    """How well one rule is satisfied, in ``[0, 1]`` -- a ramp, not a cliff.
+
+    A hard ``value > threshold`` makes the whole stage score flicker when a
+    noisy feature sits near its cutoff. Measured on benign background traffic,
+    ``beacon_regularity`` ranges over 0.72-0.79 window to window; against a
+    binary cutoff anywhere in that range the command-and-control score
+    oscillates between 0.26 and 0.68 on identical traffic, which then decides
+    whether a forecast is called CONFIRMED or not.
+
+    Ramping over a band around the threshold keeps the ordering ("more is more
+    suspicious") while making the score continuous, so a borderline value
+    contributes borderline evidence instead of all or nothing.
+    """
+    if threshold == 0:
+        lo, hi = -band, band
+    else:
+        span = abs(threshold) * band
+        lo, hi = threshold - span, threshold + span
+    if op == ">":
+        if hi <= lo:
+            return 1.0 if value > threshold else 0.0
+        return float(np.clip((value - lo) / (hi - lo), 0.0, 1.0))
+    # "<" -- support grows as the value falls below the threshold
+    if hi <= lo:
+        return 1.0 if value < threshold else 0.0
+    return float(np.clip((hi - value) / (hi - lo), 0.0, 1.0))
+
+
+def score_stages(window: dict[str, float], graded: bool = True) -> dict[str, float]:
     """Score one window's summary statistics against :data:`RULES`.
 
     Returns a score per stage in ``[0, 1]`` (fraction of that stage's rule
@@ -220,9 +250,12 @@ def score_stages(window: dict[str, float]) -> dict[str, float]:
         value = window.get(feature)
         if value is None or not np.isfinite(value):
             continue
-        fired = value > threshold if op == ">" else value < threshold
-        if fired:
-            hits[stage] = hits.get(stage, 0.0) + weight
+        if graded:
+            support = _rule_support(float(value), op, float(threshold))
+        else:
+            support = 1.0 if ((value > threshold) if op == ">" else (value < threshold)) else 0.0
+        if support > 0:
+            hits[stage] = hits.get(stage, 0.0) + weight * support
     return {stage: hits.get(stage, 0.0) / total for stage, total in totals.items() if total}
 
 

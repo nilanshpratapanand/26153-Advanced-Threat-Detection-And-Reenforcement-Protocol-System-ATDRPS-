@@ -135,8 +135,21 @@ class TestEngine(unittest.TestCase):
         self.assertTrue(infil.drivers())
         self.assertIn("infiltration", infil.to_text())
 
-    def test_headline_mentions_the_peak(self):
-        self.assertIn("peak infiltration probability", self.result.headline())
+    def test_headline_states_a_verdict_not_a_bare_probability(self):
+        """The headline must say what is *confirmed* versus merely forecast.
+
+        It used to read "peak infiltration probability 1.00 (stage: X)" where X
+        was whatever window scored highest -- including a window the model had
+        only extrapolated to, with nothing in the capture supporting it. On an
+        nmap capture whose only attack was a 3-second scan that produced
+        "peak infiltration probability 1.00 (stage: Exfiltration)".
+        """
+        headline = self.result.headline()
+        self.assertTrue(
+            any(word in headline for word in ("CONFIRMED", "PREDICTED", "no confirmed intrusion")),
+            f"headline should carry a verdict, got: {headline!r}",
+        )
+        self.assertIn("forward simulation peaks at", headline)
 
     def test_short_capture_reports_a_note_rather_than_crashing(self):
         tiny = generate_capture(seed=5, duration_s=60, n_campaigns=1,
@@ -149,8 +162,24 @@ class TestEngine(unittest.TestCase):
         self.assertIn("context", result.notes[0])
 
     def test_detects_the_injected_campaign(self):
-        """A capture containing a real kill chain must not score flat."""
-        self.assertGreater(self.result.peak_risk, 0.5)
+        """A capture containing a real kill chain must not score flat.
+
+        The bar is on the *model* output (``raw_peak_probability``), which is
+        what this assertion has always really been about. ``peak_risk`` is now
+        the dual-track credible score, and this fixture deliberately trains a
+        very small model on a tiny corpus: its raw peak is around 0.58, and on
+        a signal that weak the scoring layer is supposed to decline to confirm.
+        Asserting a confirmed verdict here would be asserting that an
+        under-trained model sounds certain, which is the opposite of the point.
+        The shipped model on a real campaign does reach CONFIRMED at 1.00 --
+        that is covered by the benchmark, not by this fixture.
+        """
+        self.assertGreater(self.result.raw_peak_probability, 0.5)
+        levels = {row.get("level") for row in self.result.timeline}
+        self.assertTrue(
+            levels - {"CLEAR"},
+            "a capture with a real kill chain should raise at least a WATCH",
+        )
 
 
 class TestDashboard(unittest.TestCase):

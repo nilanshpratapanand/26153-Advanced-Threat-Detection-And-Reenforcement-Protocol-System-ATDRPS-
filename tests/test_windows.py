@@ -155,6 +155,35 @@ class TestStateValues(unittest.TestCase):
         col = self.index(states, "beacon_regularity")
         self.assertLess(states.X[:, col].max(), 0.85)
 
+    def test_scan_rate_traffic_is_not_a_beacon(self):
+        """A port scan is metronomic but it is not beaconing.
+
+        nmap -T4 emits probes at an almost perfectly constant ~2.4 ms interval,
+        which scores a coefficient of variation near zero. Before the interval
+        floor existed that scored 1.00 regularity and tripped the C2 beacon
+        rule -- and because regularity is measured over the history window, a
+        2.4-second scan poisoned the C2 score for the next ten minutes.
+        """
+        # 400 probes, perfectly regular, 2.4 ms apart: a scan, not an implant
+        times = np.arange(400) * 0.0024
+        rows = [flow(float(t), src="192.168.1.77", dst="10.0.0.9", dport=443)
+                for t in times]
+        states = build_windows(make_flows(rows), window_size_s=30.0, history_s=900.0)
+        col = self.index(states, "beacon_regularity")
+        self.assertEqual(
+            states.X[:, col].max(), 0.0,
+            "scan-rate traffic must not register as a beacon at any regularity",
+        )
+
+    def test_a_real_slow_beacon_still_registers(self):
+        """The floor must not cost us the thing the detector is for."""
+        times = np.arange(20) * 60.0          # a 60 s implant, the classic case
+        rows = [flow(float(t), src="10.0.0.5", dst="45.1.1.1", dport=443)
+                for t in times]
+        states = build_windows(make_flows(rows), window_size_s=30.0, history_s=900.0)
+        col = self.index(states, "beacon_regularity")
+        self.assertGreater(states.X[:, col].max(), 0.9)
+
     def test_new_destination_ratio_falls_as_hosts_repeat(self):
         rows = [flow(float(i) * 31.0, dst="10.0.0.2") for i in range(5)]
         states = build_windows(make_flows(rows), window_size_s=30.0)
