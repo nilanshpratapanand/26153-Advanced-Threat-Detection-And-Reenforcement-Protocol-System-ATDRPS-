@@ -99,11 +99,12 @@ META_ALIASES: dict[str, tuple[str, ...]] = {
     "label": ("Label", "label", "attack_cat", "Attack", "class"),
 }
 
-KNOWN_DATASETS = ("cicids2018", "cicids2017", "unswnb15", "ctu13", "generic")
+KNOWN_DATASETS = ("cicids2018", "cicids2017", "unswnb15", "ctu13", "atdrps",
+                  "generic")
 
 # duration units differ: CIC reports microseconds, UNSW reports seconds
 _DURATION_SCALE = {"cicids2018": 1e-6, "cicids2017": 1e-6, "unswnb15": 1.0,
-                   "ctu13": 1.0, "generic": 1.0}
+                   "ctu13": 1.0, "atdrps": 1.0, "generic": 1.0}
 
 
 @dataclass
@@ -145,6 +146,9 @@ def detect_dataset(columns) -> str:
         return "unswnb15"
     if {"srcaddr", "dstaddr"} <= norm:
         return "ctu13"
+    # ATDRPS's own flow export: the canonical schema, written back out
+    if {"flowid", "startts", "totalpackets"} <= norm:
+        return "atdrps"
     return "generic"
 
 
@@ -178,7 +182,13 @@ def load_flow_csv(
 
     for canonical in list(FLOW_FEATURES) + list(PACKET_FEATURES):
         source_col = None
-        for alias in CANONICAL_ALIASES.get(canonical, ()):
+        # The canonical spelling itself is tried first, so a file that already
+        # speaks this schema -- ATDRPS's own flow export, or anything written
+        # against it -- round-trips instead of silently mapping to zeros. No
+        # public dataset loses by this: "Flow Duration" and "flow_duration"
+        # normalise to the same key, so an exact match and the alias for it
+        # are the same column.
+        for alias in (canonical, *CANONICAL_ALIASES.get(canonical, ())):
             source_col = lookup.get(normalise_name(alias))
             if source_col is not None:
                 break
@@ -198,7 +208,7 @@ def load_flow_csv(
     # ---- metadata
     for meta, aliases in META_ALIASES.items():
         col = None
-        for alias in aliases:
+        for alias in (meta, *aliases):
             col = lookup.get(normalise_name(alias))
             if col is not None:
                 break

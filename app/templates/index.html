@@ -176,6 +176,15 @@
          padding:46px 20px;color:var(--dim);text-align:center;gap:10px}
   .empty svg{width:34px;height:34px;opacity:.5}
   .empty .t{font-size:13px;color:var(--muted)}
+
+.source-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+.source{border:1px solid var(--line,#21262d);border-radius:10px;padding:14px 16px;background:rgba(255,255,255,.02)}
+.source-title{font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.source-sub{font-size:12.5px;opacity:.72;margin-bottom:12px;line-height:1.5}
+.chip.synth{background:rgba(210,153,34,.14);color:#d29922;border-color:rgba(210,153,34,.4);
+  font-size:10px;letter-spacing:.08em}
+.progress{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
+.progress > i{display:block;height:100%;background:#58a6ff;width:0;transition:width .4s linear}
 </style>
 </head>
 <body>
@@ -255,6 +264,60 @@
       </div>
     </form>
     <div id="status" class="meta" style="margin-top:14px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+      Don't have a capture? Make one
+    </h2>
+    <p class="hint">Two ways to produce a file for the box above, without leaving this page.
+      Everything is written to <code>data/captures/</code> on this machine.</p>
+
+    <div class="source-grid">
+      <div class="source">
+        <div class="source-title">Capture live traffic</div>
+        <div class="source-sub">Wireshark's <code>dumpcap</code> records a real interface. Needs
+          Wireshark installed and an elevated terminal.</div>
+        <div class="controls">
+          <button id="ifacesBtn" type="button" class="ghost">List interfaces</button>
+          <div class="field" style="flex:1;min-width:180px">
+            <label for="iface">interface</label>
+            <select id="iface" disabled><option>press "List interfaces"</option></select>
+          </div>
+          <div class="field">
+            <label for="capSeconds">seconds</label>
+            <input id="capSeconds" type="number" min="5" max="3600" value="300">
+          </div>
+          <button id="capBtn" type="button" disabled>Start capture</button>
+        </div>
+      </div>
+
+      <div class="source">
+        <div class="source-title">Generate a labelled capture <span class="chip synth">SYNTHETIC</span></div>
+        <div class="source-sub">The in-tree generator writes traffic with a known attack chain in it.
+          No network, no privilege, and the ground truth comes with it — this is the demo fallback.</div>
+        <div class="controls">
+          <div class="field">
+            <label for="genKind">format</label>
+            <select id="genKind">
+              <option value="pcap">.pcap (full, dual-level)</option>
+              <option value="csv">.csv (flow table)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="genSeconds">seconds</label>
+            <input id="genSeconds" type="number" min="120" max="7200" value="1800">
+          </div>
+          <div class="field">
+            <label for="genCampaigns">campaigns</label>
+            <input id="genCampaigns" type="number" min="0" max="10" value="2">
+          </div>
+          <button id="genBtn" type="button">Generate &amp; forecast</button>
+        </div>
+      </div>
+    </div>
+    <div id="sourceStatus" class="meta" style="margin-top:12px"></div>
   </div>
 
   <div id="about" class="panel hidden">
@@ -413,6 +476,96 @@ $("#form").addEventListener("submit", async e => {
   } finally {
     $("#go").disabled = false;
   }
+});
+
+// ---- getting a capture: dumpcap, or the generator ----
+// Both are long jobs, so the server hands back a job id and the page polls it.
+// Holding a five-minute HTTP request open is a request something will drop.
+const srcStatus = $("#sourceStatus");
+function srcMsg(html){ srcStatus.innerHTML = html; }
+function srcErr(msg){ srcMsg(`<span style="color:#f85149">${msg}</span>`); }
+
+$("#ifacesBtn").addEventListener("click", async () => {
+  srcMsg('<span class="spinner"></span> asking dumpcap what it can capture on&hellip;');
+  try {
+    const res = await fetch("/api/capture/interfaces");
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || "dumpcap is unavailable");
+    const sel = $("#iface");
+    sel.innerHTML = "";
+    d.interfaces.forEach(i => {
+      const o = document.createElement("option");
+      o.value = String(i.number);
+      o.textContent = `${i.number}. ${i.label}`;
+      sel.appendChild(o);
+    });
+    sel.disabled = false;
+    $("#capBtn").disabled = false;
+    srcMsg(`${d.interfaces.length} interface(s) — <code>${d.dumpcap}</code>`);
+  } catch (err) { srcErr(err.message); }
+});
+
+async function pollJob(job, label, onDone){
+  const bar = document.createElement("div");
+  while (true) {
+    await new Promise(r => setTimeout(r, 1000));
+    const d = await (await fetch(`/api/capture/job/${job}`)).json();
+    if (d.state === "error") { srcErr(d.error || "the job failed"); return; }
+    if (d.state === "done") { onDone(d); return; }
+    const pct = d.seconds ? Math.min(100, 100 * (d.elapsed || 0) / d.seconds) : 0;
+    const what = d.state === "analysing"
+      ? "parsing, windowing and forecasting&hellip;"
+      : `${label} — ${Math.round(d.elapsed || 0)}s of ${d.seconds}s`;
+    srcMsg(`<span class="spinner"></span> ${what}` +
+           (d.state === "analysing" ? "" :
+            `<div class="progress"><i style="width:${pct}%"></i></div>`));
+  }
+}
+
+function finish(d, note){
+  const file = d.file ? d.file.split(/[\\/]/).pop() : "";
+  render(d.result);
+  srcMsg(`${note} <a href="/api/capture/download/${encodeURIComponent(file)}">${file}</a>` +
+         ` — also on disk in <code>data/captures/</code>`);
+}
+
+$("#capBtn").addEventListener("click", async () => {
+  const body = {
+    interface: $("#iface").value,
+    seconds: Number($("#capSeconds").value),
+    threshold: Number($("#threshold").value),
+    horizon: Number($("#horizon").value),
+  };
+  $("#capBtn").disabled = true;
+  try {
+    const res = await fetch("/api/capture/start",
+      {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || "could not start the capture");
+    srcMsg('<span class="spinner"></span> capturing&hellip;');
+    await pollJob(d.job, "capturing", j => finish(j, "captured"));
+  } catch (err) { srcErr(err.message); }
+  finally { $("#capBtn").disabled = false; }
+});
+
+$("#genBtn").addEventListener("click", async () => {
+  const body = {
+    kind: $("#genKind").value,
+    seconds: Number($("#genSeconds").value),
+    campaigns: Number($("#genCampaigns").value),
+    threshold: Number($("#threshold").value),
+    horizon: Number($("#horizon").value),
+  };
+  $("#genBtn").disabled = true;
+  try {
+    const res = await fetch("/api/capture/generate",
+      {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || "could not generate a capture");
+    srcMsg('<span class="spinner"></span> generating&hellip;');
+    await pollJob(d.job, "generating", j => finish(j, "SYNTHETIC capture written —"));
+  } catch (err) { srcErr(err.message); }
+  finally { $("#genBtn").disabled = false; }
 });
 
 function render(d){

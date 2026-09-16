@@ -156,5 +156,56 @@ class TestMisc(unittest.TestCase):
         self.assertTrue(np.isfinite(frame.start_ts.to_numpy()).all())
 
 
+class TestCanonicalRoundTrip(unittest.TestCase):
+    """A CSV written in ATDRPS's own schema must read back as itself.
+
+    Regression: the loader resolved each canonical feature only through other
+    datasets' spellings of it, never through the canonical name, so a file that
+    already spoke this schema loaded as 13 of 71 features and every state
+    vector came back near zero.
+    """
+
+    def _canonical_frame(self):
+        from atdrps.data.flows import FLOW_META_COLUMNS
+        from atdrps.data.schema import FLOW_FEATURES, PACKET_FEATURES
+
+        columns = list(FLOW_META_COLUMNS) + list(FLOW_FEATURES) + list(PACKET_FEATURES)
+        data = {}
+        for i, col in enumerate(columns):
+            if col in {"src_ip", "dst_ip"}:
+                data[col] = ["10.0.0.1", "10.0.0.2"]
+            elif col == "flow_id":
+                data[col] = ["0", "1"]
+            elif col == "start_ts":
+                data[col] = [1_767_225_600.0, 1_767_225_630.0]
+            else:
+                data[col] = [float(i + 1), float(i + 2)]
+        return pd.DataFrame(data)
+
+    def test_every_canonical_feature_survives(self):
+        from atdrps.data.schema import FLOW_FEATURES, PACKET_FEATURES
+
+        frame = self._canonical_frame()
+        loaded = load_flow_csv(write_csv(frame))
+        self.assertEqual(loaded.dataset, "atdrps")
+        self.assertEqual(loaded.missing, [],
+                         "a canonical export must round-trip every feature")
+        self.assertEqual(len(loaded.available),
+                         len(FLOW_FEATURES) + len(PACKET_FEATURES))
+
+    def test_values_and_timestamps_are_preserved(self):
+        frame = self._canonical_frame()
+        loaded = load_flow_csv(write_csv(frame)).frame
+        np.testing.assert_allclose(loaded["start_ts"].to_numpy(),
+                                   frame["start_ts"].to_numpy())
+        np.testing.assert_allclose(loaded["total_packets"].to_numpy(),
+                                   frame["total_packets"].to_numpy())
+        np.testing.assert_allclose(loaded["ttl_std"].to_numpy(),
+                                   frame["ttl_std"].to_numpy())
+
+    def test_public_datasets_are_still_detected_as_themselves(self):
+        self.assertEqual(load_flow_csv(write_csv(CIC2018)).dataset, "cicids2018")
+
+
 if __name__ == "__main__":
     unittest.main()

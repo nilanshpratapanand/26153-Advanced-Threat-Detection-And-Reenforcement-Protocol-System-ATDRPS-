@@ -15,19 +15,28 @@ drove it.
 from __future__ import annotations
 
 import tempfile
+import threading
+import time
 import traceback
+import uuid
 from pathlib import Path
 
 import numpy as np
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 from atdrps.config import Config
 from atdrps.data.mitre import MITRE_TACTICS, describe_stage
 from atdrps.engine.inference import ThreatForecastEngine, serialise_result
+from atdrps.live import dumpcap as dumpcap_mod
 
-__all__ = ["create_app"]
+__all__ = ["create_app", "WORKSPACE"]
 
 ALLOWED = {".pcap", ".pcapng", ".cap", ".dmp", ".csv"}
+
+# Captures and generated files land here rather than in a temporary directory:
+# the whole point of the buttons is that the person keeps the file, opens it in
+# Wireshark, re-runs it later, or hands it to a judge.
+WORKSPACE = Path("data/captures")
 
 
 def create_app(model_dir: str | Path = "artifacts/model-linear",
@@ -125,5 +134,190 @@ def create_app(model_dir: str | Path = "artifacts/model-linear",
         payload = serialise_result(result)
         payload["source"] = Path(result.source).name
         return jsonify(payload)
+
+    # ------------------------------------------------------------------
+    # Getting a capture in the first place.
+    #
+    # The upload box assumes a person already has a pcap. Two things produce
+    # one: Wireshark's dumpcap, for real traffic off a real interface, and the
+    # in-tree generator, for a labelled capture that works with no network and
+    # no privilege at all -- which is what a demo needs as its fallback.
+    #
+    # A capture is a long-running job (minutes), so it runs on a thread and the
+    # page polls. The alternative, a request held open for five minutes, is a
+    # request that any proxy or browser is entitled to drop halfway through.
+    # ------------------------------------------------------------------
+    jobs: dict[str, dict] = {}
+    jobs_lock = threading.Lock()
+
+    def _analyse_path(path: Path, threshold: float, horizon, explain: bool) -> dict:
+        eng = engine()
+        eng.threshold = threshold
+        result = eng.analyse(path, horizon=horizon, explain=explain)
+        payload = serialise_result(result)
+        payload["source"] = Path(result.source).name
+        return payload
+
+    def _job_options(body: dict) -> tuple[float, object, bool]:
+        threshold = float(body.get("threshold", 0.5))
+        horizon = body.get("horizon")
+        horizon = int(horizon) if horizon else None
+        return threshold, horizon, bool(body.get("explain", True))
+
+    @app.route("/api/capture/interfaces")
+    def capture_interfaces():
+        try:
+            binary = dumpcap_mod.find_dumpcap(request.args.get("dumpcap"))
+            interfaces = dumpcap_mod.list_interfaces(binary)
+        except dumpcap_mod.DumpcapError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({
+            "ok": True, "dumpcap": str(binary),
+            "interfaces": [i.as_dict() for i in interfaces],
+            "min_seconds": dumpcap_mod.MIN_SECONDS,
+            "max_seconds": dumpcap_mod.MAX_SECONDS,
+        })
+
+    @app.route("/api/capture/start", methods=["POST"])
+    def capture_start():
+        body = request.get_json(silent=True) or {}
+        interface = str(body.get("interface", "")).strip()
+        try:
+            seconds = int(body.get("seconds", 60))
+        except (TypeError, ValueError):
+            return jsonify({"error": "seconds must be a number"}), 400
+        if not interface:
+            return jsonify({"error": "pick a capture interface first"}), 400
+        if not dumpcap_mod.MIN_SECONDS <= seconds <= dumpcap_mod.MAX_SECONDS:
+            return jsonify({
+                "error": f"duration must be {dumpcap_mod.MIN_SECONDS}-"
+                         f"{dumpcap_mod.MAX_SECONDS} seconds"
+            }), 400
+        try:
+            binary = dumpcap_mod.find_dumpcap(body.get("dumpcap"))
+        except dumpcap_mod.DumpcapError as exc:
+            return jsonify({"error": str(exc)}), 503
+
+        threshold, horizon, explain = _job_options(body)
+        WORKSPACE.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        out = WORKSPACE / f"live-{stamp}.pcapng"
+        job_id = uuid.uuid4().hex
+
+        with jobs_lock:
+            jobs[job_id] = {"state": "capturing", "seconds": seconds,
+                            "started": time.time(), "file": str(out),
+                            "kind": "capture"}
+
+        def work():
+            try:
+                outcome = dumpcap_mod.capture(interface, seconds, out, dumpcap=binary)
+                with jobs_lock:
+                    jobs[job_id].update(state="analysing", capture=outcome.as_dict())
+                payload = _analyse_path(out, threshold, horizon, explain)
+                with jobs_lock:
+                    jobs[job_id].update(state="done", result=payload)
+            except Exception as exc:
+                with jobs_lock:
+                    jobs[job_id].update(state="error", error=str(exc))
+
+        threading.Thread(target=work, daemon=True, name=f"capture-{job_id}").start()
+        return jsonify({"job": job_id, "seconds": seconds, "file": str(out)})
+
+    @app.route("/api/capture/generate", methods=["POST"])
+    def capture_generate():
+        """A labelled synthetic capture, as .pcap or as a flow CSV.
+
+        Clearly labelled as synthetic everywhere it surfaces: it is development
+        and demo data, and presenting generated traffic as a real capture is
+        the one thing this project must never do.
+        """
+        body = request.get_json(silent=True) or {}
+        kind = str(body.get("kind", "pcap")).lower()
+        if kind not in {"pcap", "pcapng", "csv"}:
+            return jsonify({"error": "kind must be pcap, pcapng or csv"}), 400
+        try:
+            seconds = int(body.get("seconds", 1800))
+            campaigns = int(body.get("campaigns", 2))
+            seed = int(body.get("seed", 4242))
+        except (TypeError, ValueError):
+            return jsonify({"error": "seconds, campaigns and seed must be numbers"}), 400
+        if not 120 <= seconds <= 7200:
+            return jsonify({"error": "duration must be 120-7200 seconds"}), 400
+        if not 0 <= campaigns <= 10:
+            return jsonify({"error": "campaigns must be 0-10"}), 400
+
+        threshold, horizon, explain = _job_options(body)
+        job_id = uuid.uuid4().hex
+        with jobs_lock:
+            jobs[job_id] = {"state": "generating", "seconds": seconds,
+                            "started": time.time(), "kind": "generate"}
+
+        def work():
+            try:
+                from atdrps.data.flows import assemble_flows
+                from atdrps.data.pcap import write_pcap
+                from atdrps.data.schema import PacketTable
+                from atdrps.data.synth import generate_capture
+
+                WORKSPACE.mkdir(parents=True, exist_ok=True)
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                cap = generate_capture(seed=seed, duration_s=float(seconds),
+                                       n_campaigns=campaigns)
+                if kind == "csv":
+                    out = WORKSPACE / f"SYNTHETIC-{stamp}.csv"
+                    flows = assemble_flows(PacketTable.from_records(cap.packets))
+                    flows.to_csv(out, index=False)
+                else:
+                    out = WORKSPACE / f"SYNTHETIC-{stamp}.pcap"
+                    write_pcap(out, cap.sorted_packets())
+                with jobs_lock:
+                    jobs[job_id].update(state="analysing", file=str(out),
+                                        synthetic=True,
+                                        packets=len(cap.packets))
+                payload = _analyse_path(out, threshold, horizon, explain)
+                payload["synthetic"] = True
+                payload["ground_truth"] = [
+                    {"stage": iv.stage, "start": iv.start, "end": iv.end,
+                     "note": iv.note}
+                    for iv in cap.timeline
+                ]
+                with jobs_lock:
+                    jobs[job_id].update(state="done", result=payload)
+            except Exception as exc:
+                with jobs_lock:
+                    jobs[job_id].update(state="error", error=str(exc),
+                                        detail=traceback.format_exc(limit=3))
+
+        threading.Thread(target=work, daemon=True, name=f"generate-{job_id}").start()
+        return jsonify({"job": job_id, "kind": kind, "seconds": seconds})
+
+    @app.route("/api/capture/job/<job_id>")
+    def capture_job(job_id: str):
+        with jobs_lock:
+            job = jobs.get(job_id)
+            job = dict(job) if job else None
+        if job is None:
+            return jsonify({"error": "no such job"}), 404
+        if job["state"] in {"capturing", "generating"}:
+            job["elapsed"] = round(time.time() - job["started"], 1)
+        return jsonify(job)
+
+    @app.route("/api/capture/download/<path:name>")
+    def capture_download(name: str):
+        """Hand back a file this dashboard produced, and only one of those.
+
+        The name is resolved inside the workspace and the result is checked to
+        be under it, so ``..`` segments cannot walk out of the directory.
+        """
+        try:
+            root = WORKSPACE.resolve()
+            target = (root / name).resolve()
+            target.relative_to(root)
+        except (ValueError, OSError):
+            return jsonify({"error": "not a file this dashboard produced"}), 400
+        if not target.is_file():
+            return jsonify({"error": "no such file"}), 404
+        return send_file(target, as_attachment=True, download_name=target.name)
 
     return app
