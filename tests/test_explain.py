@@ -187,3 +187,81 @@ class TestForecastExplainer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSaturationLink(unittest.TestCase):
+    """Attribution must stay informative when the model is confident.
+
+    Explaining in probability space fails exactly when an analyst most needs
+    the answer. Once a model sits at p = 0.99 the sigmoid is flat, so masking
+    any single feature barely moves the output, marginal contributions all
+    compress toward the same small number, and the efficiency constraint then
+    splits the gap almost evenly. A trained transformer on the demo capture
+    returned eight "top drivers" every one of which was +0.036 -- arithmetically
+    correct, analytically worthless.
+    """
+
+    class _SaturatingModel:
+        """A model whose probability head is pinned hard against 1.0.
+
+        The logit still carries the ranking; the probability has thrown it away.
+        """
+
+        context = 4
+        stage_names = ["Benign", "Reconnaissance"]
+
+        def __init__(self, n_features=6):
+            self.feature_names = [f"f{i}" for i in range(n_features)]
+            # geometrically spaced weights: a clear, checkable ordering
+            self._w = np.array([2.0 ** (-i) for i in range(n_features)])
+
+        def heads_batch(self, contexts):
+            contexts = np.asarray(contexts, dtype=np.float64)
+            z = contexts.mean(axis=1) @ self._w + 12.0      # +12 => deep saturation
+            infil = 1.0 / (1.0 + np.exp(-z))
+            probs = np.zeros((contexts.shape[0], 2))
+            probs[:, 1] = infil
+            probs[:, 0] = 1.0 - infil
+            return probs, infil
+
+    def _explain(self, link):
+        rng = np.random.default_rng(0)
+        model = self._SaturatingModel()
+        background = rng.normal(size=(12, model.context, len(model.feature_names)))
+        context = np.abs(rng.normal(size=(model.context, len(model.feature_names)))) + 1.0
+        explainer = ForecastExplainer(model, background, top_k=6, n_samples=256,
+                                      n_background=12, link=link)
+        return explainer.explain(context, target="infiltration")
+
+    def test_the_model_really_is_saturated(self):
+        """Guard the premise: if this stops saturating the test proves nothing."""
+        ex = self._explain("probability")
+        self.assertGreater(ex.prediction, 0.999)
+
+    def test_both_links_still_separate_drivers_on_this_model(self):
+        """Records what was actually measured, not what was hoped for.
+
+        The logit link was added expecting it to rescue a saturated model from
+        returning near-identical contributions. On this construction it does
+        not: probability space separates the drivers perfectly well at
+        p > 0.999, and by relative spread it separates them slightly *better*.
+        The real transformer degeneracy could not be reproduced without
+        PyTorch, so this asserts the measured fact and leaves the hypothesis
+        open rather than encoding a claim that was not demonstrated.
+        """
+        for link in ("probability", "logit"):
+            vals = [abs(d["contribution"]) for d in self._explain(link).drivers()]
+            self.assertGreater(len(set(round(v, 6) for v in vals)), 1,
+                               f"{link}: contributions collapsed to a single value")
+
+    def test_logit_ranks_the_genuinely_dominant_feature_first(self):
+        ex = self._explain("logit")
+        self.assertEqual(ex.drivers()[0]["feature"], "f0",
+                         "f0 carries the largest weight by construction")
+
+    def test_efficiency_still_holds_in_logit_space(self):
+        self.assertLess(self._explain("logit").efficiency_error, 1e-6)
+
+    def test_rejects_an_unknown_link(self):
+        with self.assertRaises(ValueError):
+            ForecastExplainer(self._SaturatingModel(), np.zeros((4, 4, 6)), link="probit")

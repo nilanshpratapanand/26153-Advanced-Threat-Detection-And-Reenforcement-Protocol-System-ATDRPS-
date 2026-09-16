@@ -17,29 +17,23 @@ steps to estimate infiltration probability *before* the kill chain completes.
 
 ## 2. Pipeline
 
-```
-PCAP/PCAPNG or flow CSV → packet parse → flow assembly → dual-level features
-   → 30s time windowing → 103-dim state S_t → temporal transformer (16-window
-   context) → {next-state Δ, stage head, infiltration head} → K-step
-   autoregressive rollout → {probability timeline, ATT&CK stage, SHAP +
-   attention} → offline Flask dashboard / CLI
-```
+PCAP/PCAPNG or flow CSV → packet parse → flow assembly → dual-level features → 30s
+windowing → 103-dim state `S_t` → temporal transformer over a 16-window context →
+{next-state Δ, stage head, infiltration head} → K-step autoregressive rollout →
+{probability timeline, ATT&CK stage, SHAP + attention} → offline dashboard or CLI.
 
 Parsing, flow assembly and feature extraction are all in-tree (no scapy/pyshark). MITRE
 stage labels for training come from dataset labels, attack timelines, or rules.
 
 ## 3. State representation
 
-Each 30-second window becomes a **103-dimensional vector**: volume/shape features (flow,
-packet and byte counts and rates, protocol mix, internal/external/inbound shares,
-top-talker concentration — 22 dims); distributional aggregates — mean, std and max of 20
-per-flow features across the window, since *spread* carries signal a mean alone does not
-(a beacon window has near-zero `iat_std`, and that is the whole tell — 60 dims); and 21
-behavioural detectors that no single flow contains — ports swept per src–dst pair, beacon
-regularity, admin/auth service share, never-before-seen destination ratio, plus seven
-built for specific families: same-port fan-out (worms), half-open ratio (denial of
-service), converging sources (credential stuffing/DDoS), DNS share/query size
-(tunnelling), TTL inconsistency and RST injection (machine-in-the-middle). Full list in
+Each 30-second window becomes a **103-dimensional vector**: volume and shape (22 dims);
+distributional aggregates — mean, std and max of 20 per-flow features, since *spread*
+carries signal a mean alone does not, a beacon window having near-zero `iat_std` (60);
+and 21 behavioural detectors no single flow contains — ports swept per src–dst pair,
+beacon regularity, admin-service share, plus seven built for specific families
+(same-port fan-out for worms, half-open ratio for DoS, converging sources for credential
+stuffing, DNS query size for tunnelling, TTL inconsistency for MitM). Full list in
 `docs/ATTACK_COVERAGE.md`.
 
 Per-flow features are dual-level by construction: NetFlow-style aggregates (duration,
@@ -57,18 +51,18 @@ A **temporal transformer** over sequences of states: linear input projection to
 self-attention, and three heads on the final position.
 
 * **Dynamics head** — predicts `S_t+1 − S_t`, a *residual*, so regularisation means
-  "nothing changes" — the correct prior for network state. Predicting the absolute state
-  instead pulls a regularised model toward the *mean* state, and a rollout that feeds mean
-  states back into its own context oscillates within a few steps. Observed and fixed.
-* **Stage head** — MITRE ATT&CK stage of the **next** window. Six stages: the five the
-  problem statement names, plus **Impact** (TA0040) for denial of service and ransomware
-  encryption, which are real, are in every dataset, and are not steps toward infiltration.
+  "nothing changes", the correct prior for network state. Predicting the absolute state
+  pulls a regularised model toward the *mean* state, and a rollout feeding mean states
+  back into its own context oscillates within a few steps. Observed and fixed.
+* **Stage head** — MITRE ATT&CK stage of the **next** window: the five the problem
+  statement names, plus **Impact** (TA0040) for denial of service and ransomware, which
+  are real, in every dataset, and not steps toward infiltration.
 * **Infiltration head** — binary probability for the next window.
 
 Training all three together is the point: forcing one representation to also reconstruct
 the next state is what makes the encoder learn dynamics rather than a signature lookup.
 Attention is bidirectional **within the observed context** only — the target window is
-never fed to the encoder, so there is no context-to-target leakage.
+never fed to the encoder, so there is no leakage.
 
 **K-step forward simulation** is autoregressive: predict, append, re-predict. Predicted
 states are clamped to the range the training data covered, so the simulation cannot
@@ -76,50 +70,52 @@ wander into states no network has ever produced.
 
 A **linear-dynamics backend** (ridge + logistic heads) implements the same interface,
 keeps the pipeline runnable without PyTorch, and answers the question a sceptical judge
-should ask: *does the transformer buy anything over a well-specified linear model?* This
-is the backend the shipped `artifacts/model-linear` and the benchmark table below use.
+should ask: *does the transformer buy anything over a well-specified linear model?* It is
+what ships as `artifacts/model-linear`.
 
 ## 5. Explainability
 
 Mandatory, answered as two questions. **What drove it** — grouped KernelSHAP over the
 state features, masking a feature's whole trace across the context against a background
-of real windows, so attributions are per *measurement*, at the level an analyst asks
-about. Implemented in-tree; verified against the closed-form Shapley values of a linear
-model to 1.2 × 10⁻⁵. **When it came from** — transformer attention over the context
-windows, with model-agnostic temporal occlusion as a cross-check and as the answer for the
-linear backend.
-
-Output is plain language: *"share of traffic to remote-access services +0.216"*, not
-`auth_service_share=0.36`. Interpretable ATT&CK rules are scored alongside as
-corroboration.
+of real windows, so attributions are per *measurement*. Implemented in-tree; verified
+against the closed-form Shapley values of a linear model to 1.2 × 10⁻⁵. **When it came
+from** — attention over the context windows, with model-agnostic occlusion as a
+cross-check and as the answer for the linear backend. Output is plain language: *"share
+of traffic to remote-access services +0.216"*, not `auth_service_share=0.36`, with
+interpretable ATT&CK rules scored alongside as corroboration.
 
 ## 6. Results
 
 Held-out captures; train and test share no window, flow or campaign. Thresholds chosen on
 validation, applied unchanged to test.
 
-| model | F1 | Precision | Recall | FPR | Stage acc. |
-|---|---|---|---|---|---|
-| logistic regression (static) | 0.8477 | 0.8275 | 0.8688 | 0.1918 | 0.7619 |
-| logistic regression (context) | 0.8946 | 0.9075 | 0.8821 | 0.0952 | 0.7956 |
-| **ATDRPS world model** | **0.9294** | **0.9306** | **0.9283** | **0.0734** | **0.8400** |
+| model | F1 | FPR | Stage acc. | Next-state MSE |
+|---|---|---|---|---|
+| logreg (static) | 0.8477 | 0.1918 | 0.7625 | — |
+| logreg (context) | 0.8948 | 0.0965 | 0.7950 | — |
+| **linear dynamics** | **0.9294** | **0.0734** | 0.8400 | **0.6114** |
+| temporal transformer | 0.9163 | 0.0901 | **0.8556** | 0.7544 |
 
-Wins at **every** horizon step (step 5: F1 0.844 vs 0.815) at less than half the
-false-positive rate of the static classifier. Weakest on **Impact** (F1 0.491, 32 test
-windows — too rare in this corpus to learn well, reported rather than hidden). Full
-per-stage and per-horizon breakdown in `docs/BENCHMARKS.md`.
+Both world models beat every static baseline and both clear the persistence floor of
+1.0068 — a model that wins on stage F1 but cannot beat "assume nothing changes" has
+learned a classifier, not dynamics.
 
-**Dynamics check.** Next-state error 0.611 against the persistence floor of 1.007 — a
-model that beats a baseline on stage F1 but cannot beat "assume nothing changes" has
-learned a classifier, not dynamics; this one clears the floor.
+**The transformer does not straightforwardly win.** It takes MITRE stage classification,
+the harder seven-class problem, by +1.6 accuracy and +2.2 macro-F1 (0.8030 vs 0.7807),
+and loses infiltration F1, FPR and next-state error. The training curve says why:
+validation loss bottomed at epoch 3 and rose for eight more while training loss fell
+36%, early-stopping at epoch 11 of 40. 4,960 sequences is not enough for a 128-dim
+three-layer encoder — an overfitting result, not a capacity ceiling. So the linear
+backend ships as default and the transformer is reported beside it, not dropped.
+
+Weakest stage is **Impact** (F1 0.491 on 32 test windows, too rare here to learn —
+reported rather than hidden). Full breakdown in `docs/BENCHMARKS.md`.
 
 ## 7. Deployment posture
 
 Fully offline: no cloud APIs, no telemetry, no runtime downloads. ATDRPS ships **its own
 pcap/pcapng parser** and **its own KernelSHAP**, so `scapy`, `pyshark` and `shap` are not
-required — one less supply-chain surface inside an air-gapped CII network. The dashboard
-is a single Flask process with every asset inlined, and input is a PCAP/PCAPNG capture or
-a flow CSV, matching the problem statement's stated input format directly.
-
-Runtime on an 88,767-packet capture: parse, assemble 4,737 flows, window, score 80
-windows, forward-simulate and explain in under 4 seconds.
+required — one less supply-chain surface inside an air-gapped CII network. Input is a
+PCAP/PCAPNG capture or a flow CSV, exactly as the problem statement specifies. An
+88,767-packet capture parses, assembles 4,737 flows, windows, scores, forward-simulates
+and explains in under 4 seconds; flow assembly shards across cores.

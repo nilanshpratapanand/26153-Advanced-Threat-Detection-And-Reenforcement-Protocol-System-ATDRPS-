@@ -75,12 +75,12 @@ call :banner
 echo.
 echo    1  Full pipeline          capture, corpus, benchmark, forecast
 echo    2  Generate a capture     labelled synthetic traffic with a kill chain
-echo    3  Build the corpus       48 captures, about 9 minutes
+echo    3  Build the corpus       48 captures, parallel across cores
 echo    4  Train the model        world model only
 echo    5  Run the benchmark      all models + docs\BENCHMARKS.md
 echo    6  Forecast a capture     timeline, stage, drivers
 echo    7  Offline dashboard      http://127.0.0.1:8501
-echo    8  Run the tests          215 tests
+echo    8  Run the tests          273 tests
 echo    9  Clean generated files
 echo    0  Quit
 echo.
@@ -116,7 +116,7 @@ if exist "%CORPUS%" (
   if /i not "!rebuild!"=="y" (echo   ok  keeping the existing corpus & goto :eof)
 )
 echo.
-echo ==^> building the training corpus  ^(48 captures, roughly 9 minutes^)
+echo ==^> building the training corpus  ^(48 captures, parallel across all CPU cores^)
 "%PY%" -m atdrps.cli corpus --captures 48 --out "%CORPUS%"
 if errorlevel 1 (echo   xx  corpus build failed & goto :eof)
 echo   ok  %CORPUS%

@@ -76,7 +76,7 @@ step_corpus() {
     read -r reply
     case "$reply" in [yY]*) ;; *) ok "keeping the existing corpus"; return 0 ;; esac
   fi
-  say "building the training corpus  ${DIM}(48 captures, roughly 9 minutes)${OFF}"
+  say "building the training corpus  ${DIM}(48 captures, parallel across all CPU cores)${OFF}"
   "$PY" -m atdrps.cli corpus --captures 48 --out "$CORPUS" || die "corpus build failed"
   ok "$CORPUS"
 }
@@ -155,7 +155,7 @@ menu() {
     printf '   %s  Run the benchmark    %s\n' "${BOLD}5${OFF}" "${DIM}all models + docs/BENCHMARKS.md${OFF}"
     printf '   %s  Forecast a capture   %s\n' "${BOLD}6${OFF}" "${DIM}timeline, stage, drivers${OFF}"
     printf '   %s  Offline dashboard    %s\n' "${BOLD}7${OFF}" "${DIM}http://127.0.0.1:8501${OFF}"
-    printf '   %s  Run the tests        %s\n' "${BOLD}8${OFF}" "${DIM}215 tests${OFF}"
+    printf '   %s  Run the tests        %s\n' "${BOLD}8${OFF}" "${DIM}273 tests${OFF}"
     printf '   %s  Clean generated files\n'   "${BOLD}9${OFF}"
     printf '   %s  Quit\n'                    "${BOLD}0${OFF}"
     printf '\n  choose: '

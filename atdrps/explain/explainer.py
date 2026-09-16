@@ -93,8 +93,34 @@ class Explanation:
 
 class ForecastExplainer:
     def __init__(self, model, background: np.ndarray, top_k: int = 8,
-                 n_samples: int = 256, n_background: int = 32, seed: int = 0) -> None:
-        """``background`` is ``(N, L, F)`` -- real observed contexts."""
+                 n_samples: int = 256, n_background: int = 32, seed: int = 0,
+                 link: str = "probability") -> None:
+        """``background`` is ``(N, L, F)`` -- real observed contexts.
+
+        ``link`` selects the space attributions are computed in.
+
+        ``"probability"`` (the default) attributes the predicted probability
+        directly, so a contribution of +0.216 means "this feature moved the
+        probability up by 0.216". That is the unit an analyst reads without
+        explanation, which is why it is the default.
+
+        ``"logit"`` attributes log-odds instead. The motivation is saturation:
+        a trained temporal transformer on the demo capture returned eight "top
+        drivers" every one of which was exactly +0.036, which is arithmetically
+        consistent and analytically useless. The logit is unbounded and locally
+        linear where the probability has flattened, so it is the standard
+        remedy when a confident model stops producing a usable ranking.
+
+        Honest caveat, because it matters: that degeneracy has *not* been
+        reproduced here. The linear backend stays well separated in probability
+        space even at p = 0.999997, and a synthetic deeply-saturated model did
+        not separate better under the logit either. So ``"logit"`` is offered as
+        a diagnostic to try when a model's drivers collapse, not as a proven
+        fix -- switching the default on an unreproduced hypothesis would be
+        changing the mandatory explainability output on a guess.
+        """
+        if link not in ("logit", "probability"):
+            raise ValueError(f"link must be 'logit' or 'probability', got {link!r}")
         bg = np.asarray(background, dtype=np.float32)
         if bg.ndim != 3:
             raise ValueError(f"background must be (N, L, F), got {bg.shape}")
@@ -106,14 +132,22 @@ class ForecastExplainer:
         self.top_k = int(top_k)
         self.n_samples = int(n_samples)
         self.seed = int(seed)
+        self.link = link
         self.feature_names = list(model.feature_names)
 
     # ------------------------------------------------------------- scoring
+    _EPS = 1e-6   # keeps logit finite at p = 0 and p = 1
+
     def _score(self, contexts: np.ndarray, target: str, stage_index: int) -> np.ndarray:
         probs, infil = self.model.heads_batch(contexts)
         if target == "infiltration":
-            return np.asarray(infil, dtype=np.float64).ravel()
-        return np.asarray(probs, dtype=np.float64)[:, stage_index]
+            out = np.asarray(infil, dtype=np.float64).ravel()
+        else:
+            out = np.asarray(probs, dtype=np.float64)[:, stage_index]
+        if self.link == "logit":
+            q = np.clip(out, self._EPS, 1.0 - self._EPS)
+            return np.log(q / (1.0 - q))
+        return out
 
     # ------------------------------------------------------------ what/why
     def explain(self, context: np.ndarray, target: str = "infiltration",
