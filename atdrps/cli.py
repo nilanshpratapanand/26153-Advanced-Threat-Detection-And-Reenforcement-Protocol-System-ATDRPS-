@@ -149,6 +149,58 @@ def cmd_benchmark(args) -> int:
     return 0
 
 
+def cmd_study(args) -> int:
+    """The two studies the benchmark table cannot answer.
+
+    Separate from ``benchmark`` because each one needs its own corpus or its
+    own split, and folding them into the headline table would put numbers
+    measured under different conditions in the same column.
+    """
+    import json as _json
+
+    from .train.studies import (
+        run_ablation, run_attack_type_holdout, write_ablation_report,
+        write_holdout_report,
+    )
+
+    cfg = Config.load(args.config, args.set)
+    set_global_seed(cfg.seed)
+    captures = _load_corpus(_corpus_path(args))
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.study == "holdout":
+        payload = run_attack_type_holdout(
+            captures, holdout_stage=args.stage, context=cfg.model.context,
+            horizon=cfg.model.horizon, backend=args.backend,
+            epochs=cfg.train.epochs, batch_size=cfg.train.batch_size,
+            lr=cfg.train.lr, d_model=cfg.model.d_model,
+            n_heads=cfg.model.n_heads, n_layers=cfg.model.n_layers,
+            verbose=True,
+        )
+        report = args.report or "docs/HOLDOUT.md"
+        text = write_holdout_report(payload, report)
+        (out_dir / "holdout.json").write_text(_json.dumps(payload, indent=2),
+                                              encoding="utf-8")
+    else:
+        payload = run_ablation(
+            captures, context=cfg.model.context, horizon=cfg.model.horizon,
+            val_frac=cfg.train.val_frac, test_frac=cfg.train.test_frac,
+            backend=args.backend, epochs=cfg.train.epochs,
+            batch_size=cfg.train.batch_size, lr=cfg.train.lr,
+            d_model=cfg.model.d_model, n_heads=cfg.model.n_heads,
+            n_layers=cfg.model.n_layers, verbose=True,
+        )
+        report = args.report or "docs/ABLATION.md"
+        text = write_ablation_report(payload, report)
+        (out_dir / "ablation.json").write_text(_json.dumps(payload, indent=2),
+                                               encoding="utf-8")
+    print()
+    print(text)
+    print(f"\nreport written to {report}")
+    return 0
+
+
 def cmd_predict(args) -> int:
     from .engine.inference import ThreatForecastEngine
 
@@ -274,6 +326,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="artifacts")
     p.add_argument("--report", default="docs/BENCHMARKS.md")
     p.set_defaults(func=cmd_benchmark)
+
+    p = sub.add_parser("study", help="attack-family holdout / dual-level ablation")
+    p.add_argument("study", choices=["holdout", "ablation"])
+    p.add_argument("--corpus", default="data/corpus.npz",
+                   help="a holdout study needs a corpus built with "
+                        "scripts/make_corpus.py --holdout-stage")
+    p.add_argument("--stage", default="LateralMovement",
+                   help="the attack family to hold out (holdout study only)")
+    p.add_argument("--backend", choices=["linear", "transformer"], default="linear")
+    p.add_argument("--out", default="artifacts")
+    p.add_argument("--report", default=None)
+    p.set_defaults(func=cmd_study)
 
     p = sub.add_parser("predict", help="forecast from a pcap or flow CSV")
     p.add_argument("capture")

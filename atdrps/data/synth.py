@@ -584,6 +584,7 @@ def generate_capture(
     continue_probs: tuple[float, float, float, float] = (0.80, 0.80, 0.75, 0.75),
     n_incidents: int = 3,
     ransomware_prob: float = 0.35,
+    incident_kinds: tuple[str, ...] | None = None,
 ) -> SyntheticCapture:
     """Build a labelled capture.
 
@@ -596,6 +597,13 @@ def generate_capture(
 
     ``ransomware_prob`` is the chance a fully-developed campaign ends in mass
     SMB encryption (Impact) rather than stopping at exfiltration.
+
+    ``incident_kinds`` restricts which standalone incidents may be drawn, and
+    exists for one reason: the attack-family holdout study
+    (:mod:`atdrps.train.studies`) needs training captures that provably contain
+    no lateral movement, and a worm incident is lateral movement.  The default
+    is the whole catalogue -- narrowing it is an experiment, not a setting
+    anyone should use to train a shipping model.
 
     ``continue_probs`` is the chance a campaign advances past each stage
     (recon->access, access->lateral, lateral->C2, C2->exfil).  The defaults give
@@ -688,6 +696,14 @@ def generate_capture(
               for _ in range(40)]
     catalogue = ["worm", "ddos", "dns_tunnel", "cred_stuffing", "web_attack", "mitm",
                  "ransomware"]
+    if incident_kinds is not None:
+        unknown = sorted(set(incident_kinds) - set(catalogue))
+        if unknown:
+            raise ValueError(f"unknown incident kinds {unknown}; "
+                             f"choose from {catalogue}")
+        catalogue = [k for k in catalogue if k in set(incident_kinds)]
+    if not catalogue:
+        n_incidents = 0
     for _ in range(max(0, n_incidents)):
         kind = str(rng.choice(catalogue))
         t = float(rng.uniform(start_ts + 30, start_ts + duration_s * 0.9))
@@ -760,6 +776,7 @@ def generate_capture(
         "n_campaigns": n_campaigns,
         "continue_probs": list(continue_probs),
         "n_incidents": n_incidents,
+        "incident_kinds": list(catalogue),
         "internal_hosts": internal,
         "external_hosts": externals,
         "attackers": attackers,
