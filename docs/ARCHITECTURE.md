@@ -122,6 +122,30 @@ class it never saw, which is reported as a zero.
 Weakest stage is **Impact** (F1 0.491 on 32 test windows, too rare here to learn —
 reported rather than hidden). Full breakdown in `docs/BENCHMARKS.md`.
 
+## 6b. Knowing when not to answer
+
+A model fitted on one traffic distribution will score a capture from another
+one without complaint, and produce confident numbers doing it. A 145-minute
+capture of ordinary university wifi -- no attack in it -- was scored
+**CONFIRMED Exfiltration at 0.96**. The cause was not the model: 54 of the 103
+state dimensions in that capture sat more than three standard deviations
+outside the training distribution, several of them infinitely outside, because
+the generator emits exactly zero for TTL inconsistency, RST injection ratio and
+inbound flow share. A linear model asked to extrapolate there extrapolates
+without limit.
+
+Every model already ships the z-score envelope its rollout clamp uses, so the
+guard is a fraction: how many of a window's dimensions fall outside the range
+the training data covered. Measured over the 8,640-window training corpus that
+fraction has median 0.000 and p95 0.0097; over the real capture, median 0.204.
+Above a median of 0.10 the headline becomes **VERDICT WITHHELD** and the scores
+are labelled unverified. Features the training data never varied are treated
+separately: their envelope is meaningless, so any other value is outside.
+
+This does not decide whether traffic is malicious. It decides whether the model
+is entitled to an opinion, and it is the honest answer to the gap that the
+benchmark corpus is generated rather than captured.
+
 ## 7. Deployment posture
 
 Fully offline: no cloud APIs, no telemetry, no runtime downloads. ATDRPS ships **its own

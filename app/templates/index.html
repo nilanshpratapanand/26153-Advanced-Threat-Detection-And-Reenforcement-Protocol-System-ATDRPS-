@@ -267,6 +267,13 @@
     .table-tools input[type=search]{max-width:none}
     .table-tools button{margin-left:0}
   }
+
+  .verdict.v-WITHHELD{border-color:#3a3f4a;background:linear-gradient(90deg,#171a20,#111419)}
+  .verdict.v-WITHHELD .v-dot{background:var(--muted);box-shadow:0 0 0 4px rgba(143,160,179,.14)}
+  .verdict.v-WITHHELD b{color:var(--muted)}
+  .ood{border:1px solid #4a3a10;background:#1b1608;border-radius:var(--radius-sm);
+       padding:13px 16px;margin:-6px 0 16px;font-size:12.5px;line-height:1.6;color:#e8d5a6}
+  .ood b{color:#d29922;font-family:var(--mono);letter-spacing:.05em}
 </style>
 </head>
 <body>
@@ -443,6 +450,7 @@
       <span id="verdictText"></span>
       <span id="verdictRight" class="v-right"></span>
     </div>
+    <div id="oodBox" class="ood hidden"></div>
 
     <div class="stats fade-in">
       <div class="stat risk gauge-stat">
@@ -694,7 +702,12 @@ function render(d){
   $("#meta").textContent =
     `${d.source} · ${d.source_kind} · ${d.n_flows} flows · ${d.n_windows} windows of ${d.window_size_s}s`;
   const notes = $("#notes"); notes.innerHTML = "";
-  (d.notes||[]).forEach(n => { const li=document.createElement("li"); li.textContent=n; notes.appendChild(li); });
+  // the novelty warning has its own banner above; repeating it verbatim in the
+  // notes list just pushes the actual capture notes off the screen
+  const novMsg = (d.novelty && d.novelty.message) || "";
+  (d.notes||[]).filter(n => n !== novMsg).forEach(n => {
+    const li=document.createElement("li"); li.textContent=n; notes.appendChild(li);
+  });
 
   drawVerdict(d);
   drawStats(d);
@@ -718,7 +731,19 @@ function peakLevel(d){
   return best;
 }
 function drawVerdict(d){
-  const level = peakLevel(d);
+  // Out-of-distribution outranks every other verdict: a model scoring traffic
+  // unlike anything it was fitted on can be confidently wrong, and saying so
+  // is more useful than the confident number underneath it.
+  const nov = d.novelty;
+  const ood = $("#oodBox");
+  if (nov && nov.verdict !== "in-distribution"){
+    ood.classList.remove("hidden");
+    ood.innerHTML = `<b>${nov.verdict === "outside" ? "OUT OF DISTRIBUTION" :
+      "EDGE OF DISTRIBUTION"}</b> &nbsp;${nov.message}`;
+  } else {
+    ood.classList.add("hidden");
+  }
+  const level = (nov && nov.verdict === "outside") ? "WITHHELD" : peakLevel(d);
   const el = $("#verdict");
   el.className = `verdict fade-in v-${level}`;
   const headline = d.headline || "";
@@ -827,6 +852,8 @@ function drawChart(d){
     svg += `<text x="${padL-8}" y="${yy+4}" fill="#5b6776" font-size="11"
       text-anchor="end" font-family="ui-monospace,monospace">${v.toFixed(2)}</text>`;
   }
+  const fcLow = fc.length &&
+    fc[fc.length-1].infiltration_probability < 0.5;   // badge will sit low
   if (fc.length){
     const bx = x(obs.length-0.5);
     svg += `<rect x="${bx}" y="${padT}" width="${x(n-1)-bx}"
@@ -835,9 +862,10 @@ function drawChart(d){
       stroke="#8fa0b3" stroke-dasharray="3 3" opacity=".55"/>`;
     // at the foot of the divider, where nothing else competes for the space --
     // the top corner belongs to the forecast-peak badge
-    svg += `<text x="${W-padR-4}" y="${padT+ih-7}" fill="#8fa0b3" font-size="10.5"
-      text-anchor="end" font-family="ui-monospace,monospace"
-      letter-spacing="1">T=0 PRESENT</text>`;
+    // opposite end of the divider from wherever the forecast badge lands
+    svg += `<text x="${W-padR-4}" y="${fcLow ? padT+13 : padT+ih-7}"
+      fill="#8fa0b3" font-size="10.5" text-anchor="end"
+      font-family="ui-monospace,monospace" letter-spacing="1">T=0 PRESENT</text>`;
   }
 
   // stage ribbon
