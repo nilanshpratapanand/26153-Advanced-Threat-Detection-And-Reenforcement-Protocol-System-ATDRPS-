@@ -98,6 +98,7 @@
   .headline{font-size:17px;font-weight:650;margin:0 0 6px}
   .meta{color:var(--muted);font-size:12.5px;font-family:var(--mono)}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .grid > *{min-width:0}
   @media(max-width:900px){.grid{grid-template-columns:1fr}}
 
   /* ---------- stat cards ---------- */
@@ -120,7 +121,7 @@
      position:sticky;top:0;background:var(--panel)}
   tbody tr{transition:background .1s}
   tbody tr:hover{background:var(--panel-2)}
-  .scroll{overflow-x:auto;border-radius:var(--radius-sm)}
+  .scroll{overflow-x:auto;max-width:100%;border-radius:var(--radius-sm)}
   .scroll::-webkit-scrollbar{height:8px}
   .scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
 
@@ -139,15 +140,15 @@
   .up{background:linear-gradient(90deg,#c0392b,var(--bad))}
   .down{background:linear-gradient(90deg,#1f7a37,var(--ok))}
 
-  .driver{display:grid;grid-template-columns:1fr 140px 70px;gap:10px;align-items:center;
+  .driver{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,140px) 70px;gap:10px;align-items:center;
           padding:7px 0;border-bottom:1px solid var(--line-soft)}
   .driver:last-child{border-bottom:none}
-  .driver .name{font-size:12.5px}
+  .driver .name{font-size:12.5px;overflow-wrap:anywhere}
   .driver .val{font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted)}
 
   /* ---------- forecast steps ---------- */
   .steps{display:flex;flex-direction:column;gap:8px}
-  .step{display:grid;grid-template-columns:36px 1fr 120px 56px;gap:12px;align-items:center;
+  .step{display:grid;grid-template-columns:36px minmax(0,1fr) minmax(0,120px) 56px;gap:12px;align-items:center;
         padding:9px 10px;border-radius:9px;background:var(--panel-2);border:1px solid var(--line-soft)}
   .step .n{font-family:var(--mono);font-size:11.5px;color:var(--dim);font-weight:700}
   .step .conf{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right}
@@ -185,6 +186,87 @@
   font-size:10px;letter-spacing:.08em}
 .progress{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
 .progress > i{display:block;height:100%;background:#58a6ff;width:0;transition:width .4s linear}
+
+  /* ---------- title bar ---------- */
+  .titlebar{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin:-6px 0 22px}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--dim);
+           text-transform:uppercase}
+  .eyebrow .sep{opacity:.5;margin:0 4px}
+  .eyebrow .mono{color:var(--muted)}
+  .page-title{margin:6px 0 0;font-size:22px;font-weight:650;letter-spacing:-.2px}
+  .jump{margin-left:auto;display:flex;gap:9px;flex-wrap:wrap}
+  .jump-btn{display:inline-flex;align-items:center;gap:7px;text-decoration:none;
+            border:1px solid var(--line);background:var(--panel);color:var(--muted);
+            border-radius:999px;padding:7px 15px;font-size:12px;font-family:var(--mono);
+            transition:border-color .15s,color .15s}
+  .jump-btn:hover{border-color:var(--accent);color:var(--ink)}
+  .jump-btn .dot{background:var(--ok)}
+
+  /* ---------- verdict banner ---------- */
+  .verdict{display:flex;align-items:center;gap:11px;border-radius:var(--radius-sm);
+           padding:13px 17px;margin-bottom:16px;font-size:13px;line-height:1.5;
+           border:1px solid var(--line);background:var(--panel)}
+  .verdict .v-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+  .verdict .v-right{margin-left:auto;font-family:var(--mono);font-size:11.5px;
+                    color:var(--muted);white-space:nowrap}
+  .verdict b{font-family:var(--mono);letter-spacing:.06em}
+  .verdict.v-CONFIRMED{border-color:#5a1d1a;background:linear-gradient(90deg,#20100f,#150c0c)}
+  .verdict.v-CONFIRMED .v-dot{background:var(--bad);box-shadow:0 0 0 4px rgba(248,81,73,.16)}
+  .verdict.v-CONFIRMED b{color:var(--bad)}
+  .verdict.v-PREDICTED{border-color:#4d2c12;background:linear-gradient(90deg,#1e1409,#140e08)}
+  .verdict.v-PREDICTED .v-dot{background:var(--lm);box-shadow:0 0 0 4px rgba(224,138,60,.16)}
+  .verdict.v-PREDICTED b{color:var(--lm)}
+  .verdict.v-WATCH{border-color:#4a3a10;background:linear-gradient(90deg,#1b1608,#120f07)}
+  .verdict.v-WATCH .v-dot{background:var(--warn);box-shadow:0 0 0 4px rgba(210,153,34,.16)}
+  .verdict.v-WATCH b{color:var(--warn)}
+  .verdict.v-CLEAR{border-color:#1c3a24;background:linear-gradient(90deg,#0d1710,#0b1110)}
+  .verdict.v-CLEAR .v-dot{background:var(--ok);box-shadow:0 0 0 4px rgba(63,185,80,.16)}
+  .verdict.v-CLEAR b{color:var(--ok)}
+
+  .sub-stat{font-size:11px;font-family:var(--mono);color:var(--dim);margin-top:2px}
+  .sub-stat .up-t{color:var(--bad)} .sub-stat .down-t{color:var(--ok)}
+  .h-tag{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dim);
+         letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+
+  /* ---------- chart extras ---------- */
+  .chart-legend{display:flex;gap:16px;flex-wrap:wrap;margin:-6px 0 10px}
+  .lg{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);
+      font-family:var(--mono)}
+  .lg i{width:14px;height:3px;border-radius:2px;display:inline-block}
+  .stage-track{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;
+               border-top:1px solid var(--line-soft)}
+  .st-item{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);
+           font-size:11px;color:var(--muted)}
+  .st-item i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .st-item em{font-style:normal;color:var(--dim)}
+
+  /* ---------- flow table tools ---------- */
+  .table-tools{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .table-tools input[type=search]{flex:1;min-width:200px;max-width:340px;background:var(--panel-2);
+    border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:9px 12px;
+    font-family:var(--mono);font-size:12.5px}
+  .table-tools input[type=search]:focus{outline:none;border-color:var(--accent)}
+  .table-tools button{margin-left:auto}
+  td.f-hot{color:var(--bad)}
+
+  /* ---------- narrow screens ---------- */
+  @media(max-width:620px){
+    .wrap{padding:20px 16px 60px}
+    .titlebar{align-items:flex-start}
+    .jump{margin-left:0}
+    .verdict{flex-wrap:wrap}
+    .verdict .v-right{margin-left:19px;white-space:normal}
+    .stats{grid-template-columns:1fr}
+    /* the forecast row is four fixed columns; at phone width the bar is the
+       one that has to give, and the confidence figure must not be clipped */
+    .step{grid-template-columns:34px 1fr 60px;row-gap:6px}
+    .step .bar{min-width:0}
+    .step .conf{grid-column:3}
+    .panel h2{flex-wrap:wrap}
+    .h-tag{margin-left:0;width:100%}
+    .table-tools input[type=search]{max-width:none}
+    .table-tools button{margin-left:0}
+  }
 </style>
 </head>
 <body>
@@ -212,6 +294,18 @@
       <span class="chip" id="modelChip">model: loading&hellip;</span>
     </div>
   </header>
+
+  <div class="titlebar">
+    <div>
+      <div class="eyebrow">OFFLINE WORLD MODEL <span class="sep">&middot;</span>
+        <span class="mono">NO CLOUD APIS &middot; NO TELEMETRY</span></div>
+      <h1 class="page-title">Network attack trajectory forecasting</h1>
+    </div>
+    <nav class="jump">
+      <a href="#sourcePanel" class="jump-btn"><span class="dot"></span>Live traffic capture</a>
+      <a href="#sourcePanel" class="jump-btn">Synthetic attack gen</a>
+    </nav>
+  </div>
 
   {% if not ready %}
   <div class="panel err">
@@ -266,7 +360,7 @@
     <div id="status" class="meta" style="margin-top:14px"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sourcePanel">
     <h2>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
       Don't have a capture? Make one
@@ -344,30 +438,39 @@
 
   <div id="results" class="hidden">
 
+    <div id="verdict" class="verdict fade-in">
+      <span class="v-dot"></span>
+      <span id="verdictText"></span>
+      <span id="verdictRight" class="v-right"></span>
+    </div>
+
     <div class="stats fade-in">
       <div class="stat risk gauge-stat">
-        <svg id="gauge" width="52" height="52" viewBox="0 0 52 52"></svg>
         <div class="g-text">
           <div class="label">Peak risk</div>
           <div class="value" id="peakRiskVal">&mdash;</div>
+          <div class="sub-stat" id="peakRiskSub"></div>
         </div>
+        <svg id="gauge" width="52" height="52" viewBox="0 0 52 52" style="margin-left:auto"></svg>
       </div>
       <div class="stat">
         <div class="label">Predicted stage</div>
         <div class="value" id="stageVal" style="font-size:15px">&mdash;</div>
+        <div class="sub-stat" id="stageSub"></div>
       </div>
       <div class="stat">
-        <div class="label">Windows analysed</div>
+        <div class="label">Temporal windows</div>
         <div class="value" id="windowsVal">&mdash;</div>
+        <div class="sub-stat" id="windowsSub"></div>
       </div>
       <div class="stat">
-        <div class="label">Flows / capture</div>
+        <div class="label">Ingested network flows</div>
         <div class="value" id="flowsVal">&mdash;</div>
+        <div class="sub-stat" id="flowsSub"></div>
       </div>
     </div>
 
     <div class="panel fade-in">
-      <h2 id="headline" class="headline"></h2>
       <div id="meta" class="meta"></div>
       <ul id="notes" class="notes"></ul>
     </div>
@@ -380,7 +483,14 @@
       <p class="hint">One-step-ahead probability for every window, then the K-step forward
         simulation (hatched) from the end of the capture. The dashed line is the alert
         threshold.</p>
+      <div class="chart-legend">
+        <span class="lg"><i style="background:#4da3ff"></i>observed</span>
+        <span class="lg"><i style="background:#4da3ff;opacity:.55;
+          border-bottom:2px dashed #4da3ff"></i>forward simulation</span>
+        <span class="lg"><i style="background:#f85149"></i>alert threshold</span>
+      </div>
       <div id="chart"></div>
+      <div id="stageTrack" class="stage-track"></div>
     </div>
 
     <div class="grid">
@@ -388,6 +498,7 @@
         <h2>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/></svg>
           Forward simulation
+          <span class="h-tag" id="horizonTag"></span>
         </h2>
         <p class="hint">Autoregressive roll-out. Confidence decays with distance — as it should.</p>
         <div id="steps" class="steps"></div>
@@ -396,7 +507,7 @@
       <div class="panel fade-in">
         <h2>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
-          Why
+          Why &mdash; Shapley attribution
         </h2>
         <p class="hint" id="whyHint"></p>
         <div id="drivers"></div>
@@ -411,7 +522,16 @@
       </h2>
       <p class="hint">The conversations behind the highest-risk window, ranked by how much
         each contributes to that judgement.</p>
+      <div class="table-tools">
+        <input id="flowFilter" type="search" placeholder="filter IP, port, flags&hellip;"
+               autocomplete="off">
+        <button id="exportFlows" type="button" class="ghost">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14"/></svg>
+          Export CSV
+        </button>
+      </div>
       <div class="scroll"><table id="flowTable"></table></div>
+      <div class="meta" id="flowFoot" style="margin-top:10px"></div>
     </div>
   </div>
 
@@ -571,28 +691,88 @@ $("#genBtn").addEventListener("click", async () => {
 function render(d){
   $("#emptyState").classList.add("hidden");
   $("#results").classList.remove("hidden");
-  $("#headline").textContent = d.headline;
   $("#meta").textContent =
     `${d.source} · ${d.source_kind} · ${d.n_flows} flows · ${d.n_windows} windows of ${d.window_size_s}s`;
   const notes = $("#notes"); notes.innerHTML = "";
   (d.notes||[]).forEach(n => { const li=document.createElement("li"); li.textContent=n; notes.appendChild(li); });
 
+  drawVerdict(d);
   drawStats(d);
   drawChart(d);
+  drawStageTrack(d);
   drawForecast(d);
   drawDrivers(d);
   drawFlows(d);
 }
 
+// The banner states the verdict the scoring policy reached, not a probability.
+// CONFIRMED means the capture itself carried corroborating evidence; PREDICTED
+// means the model forecast it and nothing in the traffic has confirmed it yet.
+// Collapsing those two into one alert is what produced phantom kill chains.
+const LEVEL_RANK = {CLEAR:0, WATCH:1, PREDICTED:2, CONFIRMED:3};
+function peakLevel(d){
+  let best = "CLEAR";
+  (d.timeline||[]).forEach(r=>{
+    if ((LEVEL_RANK[r.level]||0) > (LEVEL_RANK[best]||0)) best = r.level;
+  });
+  return best;
+}
+function drawVerdict(d){
+  const level = peakLevel(d);
+  const el = $("#verdict");
+  el.className = `verdict fade-in v-${level}`;
+  const headline = d.headline || "";
+  // Match only the leading all-caps verdict word, not the capital that starts
+  // the stage name after it -- "CONFIRMED CommandAndControl" must not become
+  // "CONFIRMED" + "ommandAndControl".
+  const m = headline.match(/^([A-Z]{2,})(?![a-z])\s*/);
+  const word = m ? m[1] : level;
+  const rest = m ? headline.slice(m[0].length) : headline;
+  $("#verdictText").innerHTML = `<b>${word}</b> ${rest}`;
+  const alerted = (d.timeline||[]).filter(r=>r.alert).length;
+  $("#verdictRight").textContent = alerted
+    ? `${alerted} of ${d.timeline.length} windows over threshold`
+    : `no window over threshold`;
+}
+
+// Where the observed run actually changed stage, and the probability at each
+// change. Derived from the timeline -- nothing here is a fixed script.
+function drawStageTrack(d){
+  const obs = d.timeline || [];
+  const marks = [];
+  obs.forEach((r,i)=>{
+    if (i === 0 || r.stage !== obs[i-1].stage) marks.push(r);
+  });
+  $("#stageTrack").innerHTML = marks.slice(0, 8).map((r,i)=>
+    `<span class="st-item"><i style="background:${STAGE_COLOR[r.stage]||"#3fb950"}"></i>` +
+    `${String(i+1).padStart(2,"0")}&middot;${r.stage} ` +
+    `<em>(${r.infiltration_probability.toFixed(2)})</em></span>`
+  ).join("") || "";
+}
+
 function drawStats(d){
   const risk = d.peak_risk ?? (d.timeline.length ? Math.max(...d.timeline.map(r=>r.infiltration_probability)) : 0);
-  $("#peakRiskVal").innerHTML = `${(risk*100).toFixed(0)}<small>%</small>`;
+  const thr = parseFloat($("#threshold").value) || 0.5;
+  $("#peakRiskVal").innerHTML = `${risk.toFixed(2)}`;
   drawGauge(risk);
+  const delta = risk - thr;
+  $("#peakRiskSub").innerHTML = delta >= 0
+    ? `<span class="up-t">&#9652; +${delta.toFixed(2)} above threshold</span>`
+    : `<span class="down-t">&#9662; ${delta.toFixed(2)} below threshold</span>`;
 
   const peakStage = (d.timeline[d.peak_window] || {}).stage || (d.explanation && d.explanation.stage) || "—";
   $("#stageVal").innerHTML = `<span class="badge b-${peakStage}">${peakStage}</span>`;
-  $("#windowsVal").textContent = d.n_windows;
-  $("#flowsVal").textContent = d.n_flows.toLocaleString();
+  const last = d.timeline[d.timeline.length-1];
+  $("#stageSub").textContent = last ? `current window: ${last.stage}` : "";
+
+  $("#windowsVal").innerHTML = `${d.n_windows} <small>windows</small>`;
+  const span = d.n_windows * d.window_size_s;
+  $("#windowsSub").textContent =
+    `${d.window_size_s}s slices · ${span >= 3600 ? (span/3600).toFixed(1)+"h" : Math.round(span)+"s"} of traffic`;
+
+  $("#flowsVal").innerHTML = `${d.n_flows.toLocaleString()}`;
+  const alerted = (d.timeline||[]).filter(r=>r.alert).length;
+  $("#flowsSub").textContent = `${alerted} window(s) alerted · source: ${d.source_kind}`;
 }
 
 function drawGauge(v){
@@ -602,7 +782,9 @@ function drawGauge(v){
     <circle cx="26" cy="26" r="${r}" fill="none" stroke="#1f2a37" stroke-width="5"/>
     <circle cx="26" cy="26" r="${r}" fill="none" stroke="${color}" stroke-width="5"
       stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c*(1-pct)}"
-      transform="rotate(-90 26 26)" style="transition:stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1)"/>`;
+      transform="rotate(-90 26 26)" style="transition:stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1)"/>
+    <text x="26" y="30" text-anchor="middle" fill="${color}" font-size="12.5"
+      font-weight="700" font-family="ui-monospace,monospace">${Math.round(pct*100)}%</text>`;
   $("#gauge").innerHTML = svg;
 }
 
@@ -646,8 +828,16 @@ function drawChart(d){
       text-anchor="end" font-family="ui-monospace,monospace">${v.toFixed(2)}</text>`;
   }
   if (fc.length){
-    svg += `<rect x="${x(obs.length-0.5)}" y="${padT}" width="${x(n-1)-x(obs.length-0.5)}"
+    const bx = x(obs.length-0.5);
+    svg += `<rect x="${bx}" y="${padT}" width="${x(n-1)-bx}"
       height="${ih}" fill="url(#hatch)" opacity=".6"/>`;
+    svg += `<line x1="${bx}" y1="${padT}" x2="${bx}" y2="${padT+ih}"
+      stroke="#8fa0b3" stroke-dasharray="3 3" opacity=".55"/>`;
+    // at the foot of the divider, where nothing else competes for the space --
+    // the top corner belongs to the forecast-peak badge
+    svg += `<text x="${W-padR-4}" y="${padT+ih-7}" fill="#8fa0b3" font-size="10.5"
+      text-anchor="end" font-family="ui-monospace,monospace"
+      letter-spacing="1">T=0 PRESENT</text>`;
   }
 
   // stage ribbon
@@ -684,6 +874,20 @@ function drawChart(d){
     svg += `<circle cx="${x(peak)}" cy="${y(obs[peak].infiltration_probability)}" r="4"
       fill="#f85149" stroke="#0b0f14" stroke-width="2"/>`;
   }
+  if (fc.length){
+    const lastFc = fc[fc.length-1], lx = x(n-1), ly = y(lastFc.infiltration_probability);
+    const label = `T+${fc.length}: ${lastFc.infiltration_probability.toFixed(2)}`;
+    const lw = label.length * 6.6 + 14;
+    // near the top of the plot the badge would sit on the T=0 divider label,
+    // so it flips below the point instead of overlapping it
+    const by = ly < padT + 42 ? ly + 12 : ly - 30;
+    svg += `<rect x="${lx-lw}" y="${by}" width="${lw}" height="19" rx="5"
+      fill="#f85149" opacity=".92"/>`;
+    svg += `<text x="${lx-lw/2}" y="${by+13.5}" fill="#160707" font-size="11.5"
+      text-anchor="middle" font-family="ui-monospace,monospace" font-weight="700">${label}</text>`;
+    svg += `<circle cx="${lx}" cy="${ly}" r="3.5" fill="#f85149"
+      stroke="#0b0f14" stroke-width="1.5"/>`;
+  }
   svg += `<text x="${padL}" y="${H-6}" fill="#5b6776" font-size="11"
     font-family="ui-monospace,monospace">observed windows</text>`;
   if (fc.length){
@@ -707,14 +911,16 @@ function drawForecast(d){
     const stageInfil = INFIL_STAGES.has(r.stage);
     const split = saysInfil !== stageInfil;
     if (split) disagreements++;
+    const secs = Math.round(r.step * (d.window_size_s || 30));
     html += `<div class="step">
-      <div class="n">+${r.step}</div>
+      <div class="n">+${r.step}<div style="font-weight:400;color:#5b6776;font-size:10px">${secs}s</div></div>
       <div><span class="badge b-${r.stage}">${r.stage}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</div>
       <div class="bar"><i class="up" style="width:${pct}%"></i></div>
       <div class="conf">${(r.infiltration_probability*100).toFixed(0)}% &middot; ${r.stage_confidence.toFixed(2)}</div>
     </div>`;
   });
   $("#steps").innerHTML = html || `<div class="meta">no forecast horizon configured</div>`;
+  $("#horizonTag").textContent = rows.length ? `K=${rows.length} horizon` : "";
   const note = $("#forecastNote");
   note.textContent = disagreements
     ? `⚠ ${disagreements} step(s) where the infiltration head and the stage head disagree. ` +
@@ -752,24 +958,71 @@ function drawDrivers(d){
     extra += `<div class="meta" style="margin-top:10px">Interpretable rules that agree:</div>
       <ul class="notes">${e.rules.map(r=>`<li>${r}</li>`).join("")}</ul>`;
   }
-  extra += `<div class="meta" style="margin-top:10px;color:#5b6776">
-    attribution efficiency error ${e.efficiency_error.toExponential(1)}
-    (Shapley values sum to the prediction gap)</div>`;
+  extra += `<div class="meta" style="margin-top:12px;padding-top:10px;
+    border-top:1px solid var(--line-soft);display:flex;gap:12px;flex-wrap:wrap;color:#5b6776">
+    <span>kernel: grouped KernelSHAP (in-tree, no <code>shap</code> dependency)</span>
+    <span style="margin-left:auto">baseline E[f(x)] = ${e.base_value.toFixed(3)}
+    &middot; efficiency error ${e.efficiency_error.toExponential(1)}</span></div>`;
   $("#ruleBox").innerHTML = extra;
 }
 
+let FLOW_ROWS = [], FLOW_META = {};
+const PROTO_NAME = {6:"TCP-6", 17:"UDP-17", 1:"ICMP-1"};
+
 function drawFlows(d){
-  const rows = d.flagged_flows || [];
+  FLOW_ROWS = d.flagged_flows || [];
+  FLOW_META = {peak: d.peak_window, windows: d.n_windows, flows: d.n_flows,
+               window_s: d.window_size_s};
+  $("#flowFilter").value = "";
+  paintFlows("");
+}
+
+function paintFlows(query){
+  const q = (query||"").trim().toLowerCase();
+  const rows = q ? FLOW_ROWS.filter(f =>
+    `${f.src} ${f.dst} ${f.flags} ${PROTO_NAME[f.protocol]||f.protocol}`.toLowerCase().includes(q)
+  ) : FLOW_ROWS;
+
   let html = `<tr><th>source</th><th>destination</th><th>proto</th><th>pkts</th>
     <th>bytes</th><th>dur (s)</th><th>flags</th><th>no-payload</th><th>retx</th></tr>`;
   rows.forEach(f=>{
-    html += `<tr><td>${f.src}</td><td>${f.dst}</td><td>${f.protocol}</td>
+    // a flow is marked only on evidence that is in the row itself: a reset in
+    // the flags, or retransmissions. No score is invented here.
+    const hot = /RST/.test(f.flags) || f.retransmissions > 0;
+    html += `<tr><td class="${hot?"f-hot":""}">${f.src}</td><td>${f.dst}</td>
+      <td>${PROTO_NAME[f.protocol]||f.protocol}</td>
       <td>${f.packets}</td><td>${f.bytes.toLocaleString()}</td><td>${f.duration}</td>
-      <td>${f.flags}</td><td>${f.payload_zero_ratio}</td><td>${f.retransmissions}</td></tr>`;
+      <td class="${hot?"f-hot":""}">${f.flags}</td>
+      <td>${f.payload_zero_ratio}</td><td>${f.retransmissions}</td></tr>`;
   });
   $("#flowTable").innerHTML = rows.length ? html :
-    `<tr><td class="meta">no flows recorded for that window</td></tr>`;
+    `<tr><td class="meta">${FLOW_ROWS.length ? "nothing matches that filter" :
+      "no flows recorded for that window"}</td></tr>`;
+  $("#flowFoot").textContent =
+    `showing ${rows.length} of ${FLOW_ROWS.length} top-ranked flows` +
+    (q ? "" : ` · peak window ${FLOW_META.peak + 1} of ${FLOW_META.windows}` +
+              ` · ${FLOW_META.flows.toLocaleString()} flows in the capture`);
 }
+
+$("#flowFilter").addEventListener("input", e => paintFlows(e.target.value));
+
+$("#exportFlows").addEventListener("click", () => {
+  if (!FLOW_ROWS.length) return;
+  const cols = ["src","dst","protocol","packets","bytes","duration","flags",
+                "payload_zero_ratio","retransmissions"];
+  const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+  const csv = [cols.join(",")]
+    .concat(FLOW_ROWS.map(f => cols.map(c => esc(f[c])).join(",")))
+    .join("\n");
+  // a Blob, not a server round trip: the rows are already in the page, and an
+  // air-gapped box should not need a network hop to save what it can see
+  const url = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `atdrps-peak-window-flows.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
 </script>
 </body>
 </html>

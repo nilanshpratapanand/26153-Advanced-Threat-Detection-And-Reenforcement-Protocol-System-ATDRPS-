@@ -188,9 +188,21 @@ class ThreatForecastEngine:
         )
         L = self.model.context
         if len(states) < L:
+            # Say how long a capture actually has to be, in seconds, because
+            # "needs 16 windows of context" is not an instruction anyone can
+            # act on while standing at a terminal.  Deliberately *not*
+            # suggesting a smaller window: the model was fitted on states
+            # aggregated over ``window_size_s``, and feeding it windows of a
+            # different length hands it features drawn from a distribution it
+            # never saw.  It would produce numbers.  They would not mean
+            # anything.
+            need_s = (L + 1) * self.window_size_s
             result.notes.append(
-                f"capture covers {len(states)} windows but the model needs {L} "
-                f"of context; extend the capture or reduce window size"
+                f"capture covers {len(states)} window(s) but the world model "
+                f"needs {L} windows of history before it can forecast anything. "
+                f"At {self.window_size_s:g}s windows that is about "
+                f"{need_s / 60:.0f} minutes of traffic; capture for 10 minutes "
+                f"or more (dumpcap -a duration:600) and try again."
             )
             return result
         return self._score(states, flows, result, horizon, explain, max_flagged)

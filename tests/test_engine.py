@@ -160,7 +160,15 @@ class TestEngine(unittest.TestCase):
             result = _Fixture.engine.analyse(info["pcap"])
         self.assertEqual(result.timeline, [])
         self.assertTrue(result.notes)
-        self.assertIn("context", result.notes[0])
+        note = result.notes[0]
+        # the note has to be actionable at a terminal: how many windows are
+        # missing, and how long a capture would actually be long enough
+        self.assertIn("window", note)
+        self.assertRegex(note, r"\d+ minutes", "the note must name a concrete duration")
+        # never tell someone to shrink the window: the model was fitted at one
+        # window size and states from another are out of its training
+        # distribution
+        self.assertNotIn("reduce window size", note)
 
     def test_detects_the_injected_campaign(self):
         """A capture containing a real kill chain must not score flat.
