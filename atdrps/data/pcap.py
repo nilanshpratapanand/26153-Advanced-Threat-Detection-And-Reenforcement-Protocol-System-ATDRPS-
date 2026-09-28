@@ -62,6 +62,13 @@ LINKTYPE_RAW_OPENBSD = 14
 LINKTYPE_LINUX_SLL = 113
 LINKTYPE_LINUX_SLL2 = 276
 
+# Upper bounds on a single record / block.  A capture is untrusted input (the
+# dashboard accepts uploads), and both formats carry 32-bit lengths, so without
+# a cap a 20-byte file can ask the reader for 4 GiB.  Real snaplens top out at
+# 262144 bytes; 16 MiB is generous headroom for jumbo/GSO-merged frames and for
+# pcapng option blocks.
+MAX_RECORD_BYTES = 16 * 1024 * 1024
+
 ETHERTYPE_IPV4 = 0x0800
 ETHERTYPE_IPV6 = 0x86DD
 ETHERTYPE_VLAN = 0x8100
@@ -231,6 +238,9 @@ def _iter_classic(fh: BinaryIO, max_packets: int | None) -> Iterator[PacketRecor
         if len(raw) < 16:
             return
         ts_sec, ts_frac, incl_len, _orig_len = rec_hdr.unpack(raw)
+        if incl_len > MAX_RECORD_BYTES:
+            raise PcapFormatError(
+                f"pcap record claims {incl_len} captured bytes (limit {MAX_RECORD_BYTES})")
         data = fh.read(incl_len)
         if len(data) < incl_len:
             return
@@ -243,6 +253,14 @@ def _iter_classic(fh: BinaryIO, max_packets: int | None) -> Iterator[PacketRecor
 
 
 def _iter_pcapng(fh: BinaryIO, max_packets: int | None) -> Iterator[PacketRecord]:
+    """Yield packets from a pcapng stream.
+
+    Every block is validated before it is read: the spec requires a total
+    length that is a multiple of 4 and at least 12, and that also guarantees the
+    loop makes forward progress -- a zero-length block used to seek backwards
+    and spin forever.  Malformed structure surfaces as :class:`PcapFormatError`
+    rather than a bare ``struct.error``.
+    """
     fh.seek(0)
     endian = "<"
     interfaces: list[tuple[int, float]] = []  # (linktype, seconds-per-tick)
@@ -256,30 +274,62 @@ def _iter_pcapng(fh: BinaryIO, max_packets: int | None) -> Iterator[PacketRecord
             bom = fh.read(4)
             if len(bom) < 4:
                 return
-            endian = "<" if struct.unpack("<I", bom)[0] == 0x1A2B3C4D else ">"
+            bom_le = struct.unpack("<I", bom)[0]
+            if bom_le == 0x1A2B3C4D:
+                endian = "<"
+            elif bom_le == 0x4D3C2B1A:
+                endian = ">"
+            else:
+                raise PcapFormatError(
+                    f"pcapng section header has an unknown byte-order magic 0x{bom_le:08x}")
             block_len = struct.unpack(endian + "I", head[4:8])[0]
+            _check_block_len(block_len, minimum=28)
             fh.seek(block_len - 12, 1)
             interfaces = []
             continue
         block_len = struct.unpack(endian + "I", head[4:8])[0]
-        if block_len < 12:
-            raise PcapFormatError(f"pcapng block length {block_len} is impossible")
+        _check_block_len(block_len, minimum=12)
         body = fh.read(block_len - 12)
+        if len(body) < block_len - 12:
+            return  # truncated final block
         fh.read(4)  # trailing length
 
-        if block_type == 0x00000001:  # Interface Description Block
-            linktype = struct.unpack_from(endian + "H", body, 0)[0]
-            interfaces.append((linktype, _sll_tsresol(body[8:], endian)))
-        elif block_type == 0x00000006:  # Enhanced Packet Block
-            iface_id, ts_hi, ts_lo, cap_len, _orig = struct.unpack_from(endian + "IIIII", body, 0)
-            linktype, tick = interfaces[iface_id] if iface_id < len(interfaces) else (LINKTYPE_ETHERNET, 1e-6)
-            ts = ((ts_hi << 32) | ts_lo) * tick
-            rec = _decode_link(linktype, bytes(body[20:20 + cap_len]), ts)
-            if rec is not None:
-                yield rec
-                count += 1
-                if max_packets is not None and count >= max_packets:
-                    return
+        try:
+            if block_type == 0x00000001:  # Interface Description Block
+                if len(body) < 8:
+                    raise PcapFormatError("pcapng interface block is shorter than 8 bytes")
+                linktype = struct.unpack_from(endian + "H", body, 0)[0]
+                interfaces.append((linktype, _sll_tsresol(body[8:], endian)))
+            elif block_type == 0x00000006:  # Enhanced Packet Block
+                if len(body) < 20:
+                    raise PcapFormatError("pcapng packet block is shorter than 20 bytes")
+                iface_id, ts_hi, ts_lo, cap_len, _orig = struct.unpack_from(
+                    endian + "IIIII", body, 0)
+                if cap_len > len(body) - 20:
+                    raise PcapFormatError(
+                        f"pcapng packet block claims {cap_len} captured bytes "
+                        f"but only {len(body) - 20} are present")
+                linktype, tick = (interfaces[iface_id] if iface_id < len(interfaces)
+                                  else (LINKTYPE_ETHERNET, 1e-6))
+                ts = ((ts_hi << 32) | ts_lo) * tick
+                rec = _decode_link(linktype, bytes(body[20:20 + cap_len]), ts)
+                if rec is not None:
+                    yield rec
+                    count += 1
+                    if max_packets is not None and count >= max_packets:
+                        return
+        except struct.error as exc:
+            raise PcapFormatError(f"malformed pcapng block: {exc}") from exc
+
+
+def _check_block_len(block_len: int, minimum: int) -> None:
+    if block_len < minimum or block_len % 4:
+        raise PcapFormatError(
+            f"pcapng block length {block_len} is invalid "
+            f"(must be a multiple of 4 and at least {minimum})")
+    if block_len > MAX_RECORD_BYTES:
+        raise PcapFormatError(
+            f"pcapng block length {block_len} exceeds the {MAX_RECORD_BYTES}-byte limit")
 
 
 def _sll_tsresol(options: bytes, endian: str) -> float:

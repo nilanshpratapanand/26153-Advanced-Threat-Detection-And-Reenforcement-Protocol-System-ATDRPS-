@@ -358,8 +358,15 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ nonce }}">
 const $ = s => document.querySelector(s);
+// Everything that came from an upload or the server is untrusted -- a flow CSV
+// can carry any string in its address columns -- so it is escaped before it goes
+// anywhere near innerHTML.
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// stage names are used as CSS class suffixes as well, so restrict them to identifier characters
+const cssId = v => String(v ?? "").replace(/[^A-Za-z0-9_-]/g, "");
 const STAGES = ["Benign","Reconnaissance","InitialAccess","LateralMovement","CommandAndControl","Exfiltration"];
 const STAGE_COLOR = {Benign:"#3fb950",Reconnaissance:"#58a6ff",InitialAccess:"#d29922",
   LateralMovement:"#e08a3c",CommandAndControl:"#bc8cff",Exfiltration:"#f85149"};
@@ -398,7 +405,7 @@ $("#form").addEventListener("submit", async e => {
   body.append("threshold", $("#threshold").value);
   body.append("horizon", $("#horizon").value);
   $("#go").disabled = true;
-  $("#status").innerHTML = `<span class="spinner"></span> parsing ${file.name} ` +
+  $("#status").innerHTML = `<span class="spinner"></span> parsing ${esc(file.name)} ` +
     `(${(file.size/1e6).toFixed(1)} MB), assembling flows, windowing, forecasting&hellip;`;
   try {
     const res = await fetch("/api/analyse", {method:"POST", body});
@@ -407,7 +414,7 @@ $("#form").addEventListener("submit", async e => {
     render(data);
     $("#status").textContent = "";
   } catch (err) {
-    $("#status").innerHTML = `<span style="color:#f85149">${err.message}</span>`;
+    $("#status").innerHTML = `<span style="color:#f85149">${esc(err.message)}</span>`;
     $("#results").classList.add("hidden");
     $("#emptyState").classList.remove("hidden");
   } finally {
@@ -437,7 +444,7 @@ function drawStats(d){
   drawGauge(risk);
 
   const peakStage = (d.timeline[d.peak_window] || {}).stage || (d.explanation && d.explanation.stage) || "—";
-  $("#stageVal").innerHTML = `<span class="badge b-${peakStage}">${peakStage}</span>`;
+  $("#stageVal").innerHTML = `<span class="badge b-${cssId(peakStage)}">${esc(peakStage)}</span>`;
   $("#windowsVal").textContent = d.n_windows;
   $("#flowsVal").textContent = d.n_flows.toLocaleString();
 }
@@ -556,7 +563,7 @@ function drawForecast(d){
     if (split) disagreements++;
     html += `<div class="step">
       <div class="n">+${r.step}</div>
-      <div><span class="badge b-${r.stage}">${r.stage}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</div>
+      <div><span class="badge b-${cssId(r.stage)}">${esc(r.stage)}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</div>
       <div class="bar"><i class="up" style="width:${pct}%"></i></div>
       <div class="conf">${(r.infiltration_probability*100).toFixed(0)}% &middot; ${r.stage_confidence.toFixed(2)}</div>
     </div>`;
@@ -580,24 +587,24 @@ function drawDrivers(d){
   $("#whyHint").innerHTML =
     `Shapley attribution for the peak window: <strong>${e.prediction.toFixed(3)}</strong> ` +
     `against a typical window's <strong>${e.base_value.toFixed(3)}</strong>. ` +
-    `Predicted stage: <span class="badge b-${e.stage}">${e.stage}</span>`;
+    `Predicted stage: <span class="badge b-${cssId(e.stage)}">${esc(e.stage)}</span>`;
   const max = Math.max(...e.drivers.map(x=>Math.abs(x.contribution)), 1e-9);
   box.innerHTML = e.drivers.map(x=>{
     const w = Math.abs(x.contribution)/max*100;
     const cls = x.contribution > 0 ? "up" : "down";
     return `<div class="driver">
-      <div class="name">${x.description}</div>
+      <div class="name">${esc(x.description)}</div>
       <div class="bar"><i class="${cls}" style="width:${w}%"></i></div>
       <div class="val">${x.contribution>0?"+":""}${x.contribution.toFixed(3)}</div>
     </div>`;
   }).join("");
 
   const kw = (e.key_windows||[]).map(w=>`<span class="kw-chip">${w.windows_ago}w ago &middot; ${w.weight.toFixed(2)}</span>`);
-  let extra = `<div class="meta" style="margin-top:10px">Most influential time steps via ${e.temporal_source}:</div>
+  let extra = `<div class="meta" style="margin-top:10px">Most influential time steps via ${esc(e.temporal_source)}:</div>
     <div class="legend">${kw.join("")}</div>`;
   if (e.rules && e.rules.length){
     extra += `<div class="meta" style="margin-top:10px">Interpretable rules that agree:</div>
-      <ul class="notes">${e.rules.map(r=>`<li>${r}</li>`).join("")}</ul>`;
+      <ul class="notes">${e.rules.map(r=>`<li>${esc(r)}</li>`).join("")}</ul>`;
   }
   extra += `<div class="meta" style="margin-top:10px;color:#5b6776">
     attribution efficiency error ${e.efficiency_error.toExponential(1)}
@@ -610,9 +617,9 @@ function drawFlows(d){
   let html = `<tr><th>source</th><th>destination</th><th>proto</th><th>pkts</th>
     <th>bytes</th><th>dur (s)</th><th>flags</th><th>no-payload</th><th>retx</th></tr>`;
   rows.forEach(f=>{
-    html += `<tr><td>${f.src}</td><td>${f.dst}</td><td>${f.protocol}</td>
+    html += `<tr><td>${esc(f.src)}</td><td>${esc(f.dst)}</td><td>${esc(f.protocol)}</td>
       <td>${f.packets}</td><td>${f.bytes.toLocaleString()}</td><td>${f.duration}</td>
-      <td>${f.flags}</td><td>${f.payload_zero_ratio}</td><td>${f.retransmissions}</td></tr>`;
+      <td>${esc(f.flags)}</td><td>${f.payload_zero_ratio}</td><td>${f.retransmissions}</td></tr>`;
   });
   $("#flowTable").innerHTML = rows.length ? html :
     `<tr><td class="meta">no flows recorded for that window</td></tr>`;

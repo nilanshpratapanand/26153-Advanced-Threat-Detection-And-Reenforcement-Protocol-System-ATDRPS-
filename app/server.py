@@ -14,20 +14,60 @@ drove it.
 
 from __future__ import annotations
 
+import copy
+import math
+import secrets
 import tempfile
-import traceback
+import threading
 from pathlib import Path
 
 import numpy as np
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, g, jsonify, render_template, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from atdrps.config import Config
-from atdrps.data.mitre import MITRE_TACTICS, describe_stage
+from atdrps.data.mitre import MITRE_TACTICS
 from atdrps.engine.inference import ThreatForecastEngine, serialise_result
 
 __all__ = ["create_app"]
 
 ALLOWED = {".pcap", ".pcapng", ".cap", ".dmp", ".csv"}
+MAX_HORIZON = 64
+
+# Every inline <script> carries a per-response nonce, so an injected script
+# without it will not run.  Styles stay 'unsafe-inline' because the page sets
+# style attributes; styles cannot execute code.
+_CSP = ("default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; base-uri 'none'; "
+        "form-action 'self'; frame-ancestors 'none'")
+
+
+class _BadParameter(ValueError):
+    """A form field the client got wrong -- reported as a 400, never a 500."""
+
+
+def _parse_threshold(raw: str | None) -> float:
+    if raw is None:
+        return 0.5
+    try:
+        value = float(raw)
+    except ValueError:
+        raise _BadParameter(f"threshold must be a number between 0 and 1, got {raw!r}") from None
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise _BadParameter(f"threshold must be between 0 and 1, got {raw!r}")
+    return value
+
+
+def _parse_horizon(raw: str | None) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        raise _BadParameter(f"horizon must be a whole number, got {raw!r}") from None
+    if not 1 <= value <= MAX_HORIZON:
+        raise _BadParameter(f"horizon must be between 1 and {MAX_HORIZON}, got {value}")
+    return value
 
 
 def create_app(model_dir: str | Path = "artifacts/model-linear",
@@ -38,6 +78,26 @@ def create_app(model_dir: str | Path = "artifacts/model-linear",
 
     model_dir = Path(model_dir)
     state: dict = {"engine": None, "error": None, "model_dir": str(model_dir)}
+    # Analyses are serialised: the model and explainer are shared, and one
+    # upload already uses every core, so concurrency buys nothing but a way for
+    # a few large uploads to starve the machine.
+    analysis_lock = threading.Lock()
+
+    @app.before_request
+    def _assign_nonce():
+        g.csp_nonce = secrets.token_urlsafe(16)
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = _CSP.format(nonce=g.get("csp_nonce", ""))
+        return response
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def _too_large(_exc):
+        return jsonify({"error": f"upload exceeds the {cfg.server.max_upload_mb} MB limit"}), 413
 
     def engine() -> ThreatForecastEngine:
         if state["engine"] is None and state["error"] is None:
@@ -71,7 +131,7 @@ def create_app(model_dir: str | Path = "artifacts/model-linear",
             ready, message = False, str(exc)
         return render_template(
             "index.html", ready=ready, message=message,
-            model_dir=str(model_dir), window_size=cfg.window.size_s,
+            model_dir=str(model_dir), window_size=cfg.window.size_s, nonce=g.csp_nonce,
             horizon=cfg.model.horizon,
             stages=[(name, MITRE_TACTICS.get(name, "-")) for name in
                     ("Benign", "Reconnaissance", "InitialAccess",
@@ -102,28 +162,34 @@ def create_app(model_dir: str | Path = "artifacts/model-linear",
                          f"expected one of {', '.join(sorted(ALLOWED))}"
             }), 400
 
-        threshold = float(request.form.get("threshold", 0.5))
-        horizon = request.form.get("horizon")
+        try:
+            threshold = _parse_threshold(request.form.get("threshold"))
+            horizon = _parse_horizon(request.form.get("horizon"))
+        except _BadParameter as exc:
+            return jsonify({"error": str(exc)}), 400
         explain = request.form.get("explain", "1") != "0"
 
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / Path(upload.filename).name
+            # never trust the client's filename for a path: only its suffix is used
+            path = Path(tmp) / f"upload{suffix}"
             upload.save(path)
             try:
-                eng = engine()
-                eng.threshold = threshold
-                result = eng.analyse(path, horizon=int(horizon) if horizon else None,
-                                     explain=explain)
+                with analysis_lock:
+                    # a per-request copy, so one caller's threshold cannot
+                    # bleed into the next caller's analysis
+                    eng = copy.copy(engine())
+                    eng.threshold = threshold
+                    result = eng.analyse(path, horizon=horizon, explain=explain)
             except RuntimeError as exc:
                 return jsonify({"error": str(exc)}), 503
             except Exception as exc:            # a bad capture must not 500 silently
+                app.logger.exception("analysis failed for %r", upload.filename)
                 return jsonify({
                     "error": f"could not analyse this capture: {exc}",
-                    "detail": traceback.format_exc(limit=3),
                 }), 400
 
         payload = serialise_result(result)
-        payload["source"] = Path(result.source).name
+        payload["source"] = Path(upload.filename).name
         return jsonify(payload)
 
     return app
