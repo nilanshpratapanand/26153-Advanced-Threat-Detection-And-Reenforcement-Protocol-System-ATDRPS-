@@ -88,7 +88,7 @@ ground-truth timeline -> data/demo/capture.timeline.json
 ### Code Artifacts
 - [ ] install.sh / install.bat (tested)
 - [ ] run.sh / run.bat (all commands work)
-- [ ] 234 passing tests
+- [ ] 305 passing tests
 - [ ] Dashboard interface working
 - [ ] All source code in `atdrps/` directory
 - [ ] Test suite in `tests/` directory
