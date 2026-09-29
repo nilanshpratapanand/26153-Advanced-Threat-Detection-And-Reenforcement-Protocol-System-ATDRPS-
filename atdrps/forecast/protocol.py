@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-__all__ = ["OnsetSamples", "build_onset_samples", "split_groups", "evaluate",
+__all__ = ["OnsetSamples", "build_onset_samples", "split_groups", "evaluate", "contexts_from_states",
            "threshold_for_fpr", "PREVALENCES", "FPR_BUDGETS"]
 
 PREVALENCES = (1e-2, 1e-3, 1e-4)      # assumed real onset rate per window
@@ -276,3 +276,11 @@ def _dedupe_events(samples, idx, pick, index_by_group):
         cursor += n
     sub.onset_id = oid
     return sub
+
+
+def contexts_from_states(states, context: int) -> np.ndarray:
+    """Every length-``context`` sliding window of a capture, for false-alarm counting."""
+    X = np.asarray(states.X, dtype=np.float32)
+    if len(X) < context:
+        return np.zeros((0, context, X.shape[1]), dtype=np.float32)
+    return np.stack([X[t - context + 1:t + 1] for t in range(context - 1, len(X))])
