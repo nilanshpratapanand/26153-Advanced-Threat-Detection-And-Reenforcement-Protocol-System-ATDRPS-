@@ -241,7 +241,7 @@ atdrps/
 app/                  offline Flask dashboard
 configs/              YAML configuration
 docs/                 architecture, attack coverage, benchmarks, slides, demo script
-tests/                350 tests, standard library runner
+tests/                414 tests, standard library runner
 ```
 
 ## Testing
