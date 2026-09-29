@@ -196,6 +196,51 @@ class TestTorchBackend(unittest.TestCase):
         after = reloaded.predict_next(ds.context[0])
         self.assertTrue(np.allclose(before, after, atol=1e-5))
 
+    def test_checkpoint_is_loaded_with_weights_only(self):
+        """A tampered weights.pt must not be able to run code on load.
+
+        PyTorch only made ``weights_only=True`` the default in 2.6 and this
+        project supports ``torch>=2.1``, so the argument has to be explicit.
+        """
+        import tempfile
+        from unittest import mock
+        import torch
+        ds = self._dataset()
+        model = TemporalTransformerWorldModel(
+            ds.feature_names, context=ds.context_length, horizon=3,
+            stage_names=("Benign", "Reconnaissance"), d_model=32, n_heads=4, n_layers=2,
+        )
+        model.fit(ds, epochs=1, batch_size=16, verbose=False, patience=0)
+        with tempfile.TemporaryDirectory() as tmp:
+            model.save(tmp)
+            real_load = torch.load
+            with mock.patch("torch.load", side_effect=real_load) as spy:
+                TemporalTransformerWorldModel.load(tmp)
+            self.assertTrue(spy.called)
+            self.assertIs(spy.call_args.kwargs.get("weights_only"), True)
+
+    def test_tampered_checkpoint_does_not_execute_code(self):
+        import os, pickle, tempfile
+        ds = self._dataset()
+        model = TemporalTransformerWorldModel(
+            ds.feature_names, context=ds.context_length, horizon=3,
+            stage_names=("Benign", "Reconnaissance"), d_model=32, n_heads=4, n_layers=2,
+        )
+        model.fit(ds, epochs=1, batch_size=16, verbose=False, patience=0)
+        with tempfile.TemporaryDirectory() as tmp:
+            model.save(tmp)
+            marker = os.path.join(tmp, "pwned")
+
+            class Evil:
+                def __reduce__(self):
+                    return (os.system, (f"touch {marker}",))
+
+            with open(os.path.join(tmp, "weights.pt"), "wb") as fh:
+                pickle.dump(Evil(), fh)
+            with self.assertRaises(Exception):
+                TemporalTransformerWorldModel.load(tmp)
+            self.assertFalse(os.path.exists(marker), "payload executed on load")
+
     def test_wrong_context_length_is_rejected(self):
         ds = self._dataset()
         model = TemporalTransformerWorldModel(

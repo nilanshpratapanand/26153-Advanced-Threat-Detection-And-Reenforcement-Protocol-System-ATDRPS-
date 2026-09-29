@@ -48,6 +48,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 
 from ..data.schema import STAGES
 from .base import Forecast, WorldModel
+from .safe_pickle import safe_load
 
 __all__ = ["NumpyDynamicsWorldModel", "PersistenceModel"]
 
@@ -244,7 +245,7 @@ class NumpyDynamicsWorldModel(WorldModel):
         path = Path(path)
         config = json.loads((path / "config.json").read_text(encoding="utf-8"))
         with open(path / "model.pkl", "rb") as fh:
-            blob = pickle.load(fh)
+            blob = safe_load(fh)
         model = cls(
             feature_names=config["feature_names"], context=config["context"],
             horizon=config["horizon"], stage_names=tuple(config["stage_names"]),

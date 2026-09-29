@@ -549,8 +549,15 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ nonce }}">
 const $ = s => document.querySelector(s);
+// Everything that came from an upload or the server is untrusted -- a flow CSV
+// can carry any string in its address columns -- so it is escaped before it goes
+// anywhere near innerHTML.
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// stage names are used as CSS class suffixes as well, so restrict them to identifier characters
+const cssId = v => String(v ?? "").replace(/[^A-Za-z0-9_-]/g, "");
 const STAGES = ["Benign","Reconnaissance","InitialAccess","LateralMovement","CommandAndControl","Exfiltration"];
 const STAGE_COLOR = {Benign:"#3fb950",Reconnaissance:"#58a6ff",InitialAccess:"#d29922",
   LateralMovement:"#e08a3c",CommandAndControl:"#bc8cff",Exfiltration:"#f85149"};
@@ -589,7 +596,7 @@ $("#form").addEventListener("submit", async e => {
   body.append("threshold", $("#threshold").value);
   body.append("horizon", $("#horizon").value);
   $("#go").disabled = true;
-  $("#status").innerHTML = `<span class="spinner"></span> parsing ${file.name} ` +
+  $("#status").innerHTML = `<span class="spinner"></span> parsing ${esc(file.name)} ` +
     `(${(file.size/1e6).toFixed(1)} MB), assembling flows, windowing, forecasting&hellip;`;
   try {
     const res = await fetch("/api/analyse", {method:"POST", body});
@@ -598,7 +605,7 @@ $("#form").addEventListener("submit", async e => {
     render(data);
     $("#status").textContent = "";
   } catch (err) {
-    $("#status").innerHTML = `<span style="color:#f85149">${err.message}</span>`;
+    $("#status").innerHTML = `<span style="color:#f85149">${esc(err.message)}</span>`;
     $("#results").classList.add("hidden");
     $("#emptyState").classList.remove("hidden");
   } finally {
@@ -611,7 +618,7 @@ $("#form").addEventListener("submit", async e => {
 // Holding a five-minute HTTP request open is a request something will drop.
 const srcStatus = $("#sourceStatus");
 function srcMsg(html){ srcStatus.innerHTML = html; }
-function srcErr(msg){ srcMsg(`<span style="color:#f85149">${msg}</span>`); }
+function srcErr(msg){ srcMsg(`<span style="color:#f85149">${esc(msg)}</span>`); }
 
 $("#ifacesBtn").addEventListener("click", async () => {
   srcMsg('<span class="spinner"></span> asking dumpcap what it can capture on&hellip;');
@@ -629,7 +636,7 @@ $("#ifacesBtn").addEventListener("click", async () => {
     });
     sel.disabled = false;
     $("#capBtn").disabled = false;
-    srcMsg(`${d.interfaces.length} interface(s) — <code>${d.dumpcap}</code>`);
+    srcMsg(`${d.interfaces.length} interface(s) — <code>${esc(d.dumpcap)}</code>`);
   } catch (err) { srcErr(err.message); }
 });
 
@@ -653,7 +660,7 @@ async function pollJob(job, label, onDone){
 function finish(d, note){
   const file = d.file ? d.file.split(/[\\/]/).pop() : "";
   render(d.result);
-  srcMsg(`${note} <a href="/api/capture/download/${encodeURIComponent(file)}">${file}</a>` +
+  srcMsg(`${note} <a href="/api/capture/download/${encodeURIComponent(file)}">${esc(file)}</a>` +
          ` — also on disk in <code>data/captures/</code>`);
 }
 
@@ -739,7 +746,7 @@ function drawVerdict(d){
   if (nov && nov.verdict !== "in-distribution"){
     ood.classList.remove("hidden");
     ood.innerHTML = `<b>${nov.verdict === "outside" ? "OUT OF DISTRIBUTION" :
-      "EDGE OF DISTRIBUTION"}</b> &nbsp;${nov.message}`;
+      "EDGE OF DISTRIBUTION"}</b> &nbsp;${esc(nov.message)}`;
   } else {
     ood.classList.add("hidden");
   }
@@ -753,7 +760,7 @@ function drawVerdict(d){
   const m = headline.match(/^([A-Z]{2,})(?![a-z])\s*/);
   const word = m ? m[1] : level;
   const rest = m ? headline.slice(m[0].length) : headline;
-  $("#verdictText").innerHTML = `<b>${word}</b> ${rest}`;
+  $("#verdictText").innerHTML = `<b>${esc(word)}</b> ${esc(rest)}`;
   const alerted = (d.timeline||[]).filter(r=>r.alert).length;
   $("#verdictRight").textContent = alerted
     ? `${alerted} of ${d.timeline.length} windows over threshold`
@@ -770,7 +777,7 @@ function drawStageTrack(d){
   });
   $("#stageTrack").innerHTML = marks.slice(0, 8).map((r,i)=>
     `<span class="st-item"><i style="background:${STAGE_COLOR[r.stage]||"#3fb950"}"></i>` +
-    `${String(i+1).padStart(2,"0")}&middot;${r.stage} ` +
+    `${String(i+1).padStart(2,"0")}&middot;${esc(r.stage)} ` +
     `<em>(${r.infiltration_probability.toFixed(2)})</em></span>`
   ).join("") || "";
 }
@@ -786,7 +793,7 @@ function drawStats(d){
     : `<span class="down-t">&#9662; ${delta.toFixed(2)} below threshold</span>`;
 
   const peakStage = (d.timeline[d.peak_window] || {}).stage || (d.explanation && d.explanation.stage) || "—";
-  $("#stageVal").innerHTML = `<span class="badge b-${peakStage}">${peakStage}</span>`;
+  $("#stageVal").innerHTML = `<span class="badge b-${cssId(peakStage)}">${esc(peakStage)}</span>`;
   const last = d.timeline[d.timeline.length-1];
   $("#stageSub").textContent = last ? `current window: ${last.stage}` : "";
 
@@ -942,7 +949,7 @@ function drawForecast(d){
     const secs = Math.round(r.step * (d.window_size_s || 30));
     html += `<div class="step">
       <div class="n">+${r.step}<div style="font-weight:400;color:#5b6776;font-size:10px">${secs}s</div></div>
-      <div><span class="badge b-${r.stage}">${r.stage}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</div>
+      <div><span class="badge b-${cssId(r.stage)}">${esc(r.stage)}</span>${split?' <span title="the infiltration head and the stage head disagree here" style="color:#d29922">&#9888;</span>':''}</div>
       <div class="bar"><i class="up" style="width:${pct}%"></i></div>
       <div class="conf">${(r.infiltration_probability*100).toFixed(0)}% &middot; ${r.stage_confidence.toFixed(2)}</div>
     </div>`;
@@ -967,24 +974,24 @@ function drawDrivers(d){
   $("#whyHint").innerHTML =
     `Shapley attribution for the peak window: <strong>${e.prediction.toFixed(3)}</strong> ` +
     `against a typical window's <strong>${e.base_value.toFixed(3)}</strong>. ` +
-    `Predicted stage: <span class="badge b-${e.stage}">${e.stage}</span>`;
+    `Predicted stage: <span class="badge b-${cssId(e.stage)}">${esc(e.stage)}</span>`;
   const max = Math.max(...e.drivers.map(x=>Math.abs(x.contribution)), 1e-9);
   box.innerHTML = e.drivers.map(x=>{
     const w = Math.abs(x.contribution)/max*100;
     const cls = x.contribution > 0 ? "up" : "down";
     return `<div class="driver">
-      <div class="name">${x.description}</div>
+      <div class="name">${esc(x.description)}</div>
       <div class="bar"><i class="${cls}" style="width:${w}%"></i></div>
       <div class="val">${x.contribution>0?"+":""}${x.contribution.toFixed(3)}</div>
     </div>`;
   }).join("");
 
   const kw = (e.key_windows||[]).map(w=>`<span class="kw-chip">${w.windows_ago}w ago &middot; ${w.weight.toFixed(2)}</span>`);
-  let extra = `<div class="meta" style="margin-top:10px">Most influential time steps via ${e.temporal_source}:</div>
+  let extra = `<div class="meta" style="margin-top:10px">Most influential time steps via ${esc(e.temporal_source)}:</div>
     <div class="legend">${kw.join("")}</div>`;
   if (e.rules && e.rules.length){
     extra += `<div class="meta" style="margin-top:10px">Interpretable rules that agree:</div>
-      <ul class="notes">${e.rules.map(r=>`<li>${r}</li>`).join("")}</ul>`;
+      <ul class="notes">${e.rules.map(r=>`<li>${esc(r)}</li>`).join("")}</ul>`;
   }
   extra += `<div class="meta" style="margin-top:12px;padding-top:10px;
     border-top:1px solid var(--line-soft);display:flex;gap:12px;flex-wrap:wrap;color:#5b6776">
@@ -1017,10 +1024,10 @@ function paintFlows(query){
     // a flow is marked only on evidence that is in the row itself: a reset in
     // the flags, or retransmissions. No score is invented here.
     const hot = /RST/.test(f.flags) || f.retransmissions > 0;
-    html += `<tr><td class="${hot?"f-hot":""}">${f.src}</td><td>${f.dst}</td>
-      <td>${PROTO_NAME[f.protocol]||f.protocol}</td>
+    html += `<tr><td class="${hot?"f-hot":""}">${esc(f.src)}</td><td>${esc(f.dst)}</td>
+      <td>${esc(PROTO_NAME[f.protocol]||f.protocol)}</td>
       <td>${f.packets}</td><td>${f.bytes.toLocaleString()}</td><td>${f.duration}</td>
-      <td class="${hot?"f-hot":""}">${f.flags}</td>
+      <td class="${hot?"f-hot":""}">${esc(f.flags)}</td>
       <td>${f.payload_zero_ratio}</td><td>${f.retransmissions}</td></tr>`;
   });
   $("#flowTable").innerHTML = rows.length ? html :
@@ -1038,9 +1045,15 @@ $("#exportFlows").addEventListener("click", () => {
   if (!FLOW_ROWS.length) return;
   const cols = ["src","dst","protocol","packets","bytes","duration","flags",
                 "payload_zero_ratio","retransmissions"];
-  const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+  // Quote every cell, and defuse spreadsheet formulas: a cell that starts with = + - @ would be
+  // executed by Excel/LibreOffice when the exported file is opened.
+  const csvCell = v => {
+    let t = String(v);
+    if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+    return `"${t.replace(/"/g,'""')}"`;
+  };
   const csv = [cols.join(",")]
-    .concat(FLOW_ROWS.map(f => cols.map(c => esc(f[c])).join(",")))
+    .concat(FLOW_ROWS.map(f => cols.map(c => csvCell(f[c])).join(",")))
     .join("\n");
   // a Blob, not a server round trip: the rows are already in the page, and an
   // air-gapped box should not need a network hop to save what it can see

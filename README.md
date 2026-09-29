@@ -38,6 +38,20 @@ That trajectory is what ATDRPS models.
 
 ## Results
 
+> **Read this first.** The table below is the v1 window-level benchmark on *synthetic*
+> captures. An audit showed it largely measures detecting an attack that is already under
+> way (copying the current label forward scores F1 0.898), and a real benign laptop capture
+> pushed the v1 model to near-saturated attack scores. It is kept for history only.
+> The honest, current evaluation (quiet-state onset forecasting, real background traffic,
+> confidence intervals, false-alarm accounting) is in
+> [`docs/RESEARCH_AND_PLAN_V2.md`](docs/RESEARCH_AND_PLAN_V2.md): forecasting an onset from
+> silence is not achieved; forecasting escalation once early activity is visible flags about
+> half to three quarters of simulated escalations ~2.5 min ahead at 1-4 false alerts/hour
+> (15 test events, one background network, simulated attacks) -- a triage aid, not field-ready.
+> To try it on your own network: `atdrps train-local --benign normal.pcap`, then
+> `atdrps forecast capture.pcap` (see the notes on benign-data length in that document).
+
+
 Held-out captures — train and test share no window, no flow and no campaign. Operating
 thresholds are chosen on the validation split and applied unchanged to test.
 
@@ -112,7 +126,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python tests/run_tests.py          # 294 tests, standard library only (no pytest)
+python tests/run_tests.py          # standard-library runner (no pytest); PyTorch- and Chromium-backed tests skip when absent
 ```
 
 PyTorch is needed only for the temporal transformer backend; everything else — ingestion,
@@ -227,7 +241,7 @@ atdrps/
 app/                  offline Flask dashboard
 configs/              YAML configuration
 docs/                 architecture, attack coverage, benchmarks, slides, demo script
-tests/                273 tests, standard library only
+tests/                414 tests, standard library runner
 ```
 
 ## Testing

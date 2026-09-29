@@ -289,6 +289,20 @@ class TestLogisticBaseline(unittest.TestCase):
         self.assertEqual(len(base.stage_models), 3)
         self.assertEqual(len(base.infil_models), 3)
 
+    def test_save_load_roundtrip_through_the_restricted_unpickler(self):
+        import tempfile, os
+        for mode in ("static", "context"):
+            with self.subTest(mode=mode):
+                base = LogisticBaseline(mode=mode).fit(self.train, n_stages=len(STAGES))
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = os.path.join(tmp, "baseline.pkl")
+                    base.save(path)
+                    reloaded = LogisticBaseline.load(path)
+                s1, i1 = base.predict(self.test)
+                s2, i2 = reloaded.predict(self.test)
+                np.testing.assert_allclose(s1, s2)
+                np.testing.assert_allclose(i1, i2)
+
     def test_bad_mode_rejected(self):
         with self.assertRaises(ValueError):
             LogisticBaseline(mode="telepathy")

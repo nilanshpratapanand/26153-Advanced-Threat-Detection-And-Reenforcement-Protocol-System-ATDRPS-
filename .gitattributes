@@ -1,0 +1,5 @@
+# Windows cmd.exe mis-parses labels/goto in batch files with LF-only line endings,
+# so batch files are always checked out with CRLF; shell scripts always with LF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh  text eol=lf

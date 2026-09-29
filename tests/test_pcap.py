@@ -211,5 +211,77 @@ class TestPcapng(unittest.TestCase):
         self.assertAlmostEqual(rec.ts, 1_700_000_000.5, places=4)
 
 
+class TestMalformedCaptures(unittest.TestCase):
+    """Hostile or corrupt input must fail fast with PcapFormatError.
+
+    These files are attacker-influenced (they arrive through the dashboard's
+    upload), so none may hang, allocate gigabytes, or leak a struct.error.
+    """
+
+    _GLOBAL = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
+    _SHB = (struct.pack("<II", 0x0A0D0D0A, 28) + struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1)
+            + struct.pack("<I", 28))
+
+    def _read(self, data, name="t.bin"):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, name)
+            with open(path, "wb") as fh:
+                fh.write(data)
+            return read_pcap(path)
+
+    def test_classic_huge_record_length_rejected(self):
+        data = self._GLOBAL + struct.pack("<IIII", 1, 0, 0xFFFFFFF0, 0xFFFFFFF0) + b"x" * 64
+        with self.assertRaises(PcapFormatError):
+            self._read(data)
+
+    def test_pcapng_zero_length_section_header_rejected(self):
+        data = struct.pack("<II", 0x0A0D0D0A, 0) + struct.pack("<I", 0x1A2B3C4D) + bytes(20)
+        with self.assertRaises(PcapFormatError):
+            self._read(data)
+
+    def test_pcapng_unknown_byte_order_magic_rejected(self):
+        data = (struct.pack("<II", 0x0A0D0D0A, 28) + struct.pack("<I", 0xDEADBEEF)
+                + bytes(12) + struct.pack("<I", 28))
+        with self.assertRaises(PcapFormatError):
+            self._read(data)
+
+    def test_pcapng_huge_block_length_rejected(self):
+        data = self._SHB + struct.pack("<II", 6, 0xFFFFFFF0) + b"x" * 64
+        with self.assertRaises(PcapFormatError):
+            self._read(data)
+
+    def test_pcapng_unaligned_block_length_rejected(self):
+        data = self._SHB + struct.pack("<II", 6, 33) + bytes(21) + struct.pack("<I", 33)
+        with self.assertRaises(PcapFormatError):
+            self._read(data)
+
+    def test_pcapng_short_enhanced_packet_block_rejected(self):
+        data = self._SHB + struct.pack("<II", 6, 20) + bytes(8) + struct.pack("<I", 20)
+        with self.assertRaises(PcapFormatError):
+            self._read(data)
+
+    def test_pcapng_captured_length_beyond_block_rejected(self):
+        body = struct.pack("<IIIII", 0, 0, 0, 5000, 5000) + bytes(8)
+        blk = struct.pack("<II", 6, len(body) + 12) + body + struct.pack("<I", len(body) + 12)
+        with self.assertRaises(PcapFormatError):
+            self._read(self._SHB + blk)
+
+    def test_pcapng_short_interface_block_rejected(self):
+        blk = struct.pack("<II", 1, 16) + bytes(4) + struct.pack("<I", 16)
+        with self.assertRaises(PcapFormatError):
+            self._read(self._SHB + blk)
+
+    def test_big_endian_pcapng_section_header_is_read_correctly(self):
+        shb = (struct.pack(">II", 0x0A0D0D0A, 28) + struct.pack(">IHHq", 0x1A2B3C4D, 1, 0, -1)
+               + struct.pack(">I", 28))
+        idb_body = struct.pack(">HHI", 1, 0, 65535)
+        idb = struct.pack(">II", 1, 20) + idb_body + struct.pack(">I", 20)
+        frame = _eth_ipv4_tcp_frame()
+        pad = (4 - len(frame) % 4) % 4
+        body = struct.pack(">IIIII", 0, 0, 1_700_000_000, len(frame), len(frame)) + frame + bytes(pad)
+        epb = struct.pack(">II", 6, len(body) + 12) + body + struct.pack(">I", len(body) + 12)
+        self.assertEqual(len(self._read(shb + idb + epb)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

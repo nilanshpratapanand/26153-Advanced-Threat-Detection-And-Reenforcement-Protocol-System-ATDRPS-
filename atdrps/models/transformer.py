@@ -420,7 +420,11 @@ class TemporalTransformerWorldModel(WorldModel):
             from .base import Standardiser
             model.standardiser = Standardiser.from_state_dict(config["standardiser"])
         _, _, _, net = model._build()
-        net.load_state_dict(torch.load(path / "weights.pt", map_location=model._device()))
+        # weights_only=True: a checkpoint is data, never code. PyTorch only made this
+        # the default in 2.6, and this project supports torch>=2.1.
+        state = torch.load(path / "weights.pt", map_location=model._device(),
+                           weights_only=True)
+        net.load_state_dict(state)
         model.net = net
         model.fitted = True
         return model

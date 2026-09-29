@@ -7,8 +7,8 @@
 - Successfully tested on Python 3.12.3
 
 ## ✅ Test Suite
-- **Status**: 234/234 PASSING ✓
-- 7 skipped (expected network-dependent tests)
+- **Status**: see `python tests/run_tests.py` (count is printed by the runner; do not trust a number copied into a doc)
+- Tests that need PyTorch or Playwright/Chromium skip themselves when those are absent
 - All core functionality verified:
   - State vector computation (103 dimensions)
   - Attack generators (7 families)
@@ -48,8 +48,8 @@
 | Out of scope | 3 | XSS, Zero-day exploit, Session hijacking |
 
 ### Model Comparison
-- **Linear Dynamics**: Fast, interpretable, 87% F1 on test set
-- **Temporal Transformer**: (optional) Higher expressiveness, requires PyTorch
+- **Linear Dynamics**: F1 0.929 on the held-out test split (see `docs/BENCHMARKS.md`)
+- **Temporal Transformer**: requires PyTorch. Its benchmark row has **not** been generated in this repo's committed report; run `atdrps benchmark` with PyTorch installed to produce it
 
 ## ✅ Deliverables
 ### Documentation
@@ -64,25 +64,23 @@
 - [ ] setup scripts (install.sh / install.bat) - ✓ Tested
 - [ ] run scripts (run.sh / run.bat) - ✓ Tested
 - [ ] Full pipeline (capture → feature → predict) - ✓ Verified
-- [ ] Test suite (234 tests) - ✓ All passing
-- [ ] Offline dashboard (Streamlit/Flask) - ✓ Running
+- [ ] Test suite - ✓ All passing (run `python tests/run_tests.py`)
+- [ ] Offline dashboard (Flask) - ✓ Running
 
 ### Presentation
 - [ ] 5-slide deck (ATDRPS_SIH26153.pptx) - ✓ Updated with final numbers
 - [ ] 2-minute demo video - PENDING (ready to record)
 
 ## ✅ Key Performance Numbers
-- **Infiltration Detection**: Peak probability 1.00 on labeled attacks
-- **Stage Forecasting**: Correct MITRE stage in 8/10 windows
-- **False Positives**: 0.12 per benign capture (low benign alert rate)
-- **Test Coverage**: 234 tests covering all major components
+- Headline numbers live in `docs/BENCHMARKS.md` (single source of truth). Raw peak probability is no longer the headline: the dual-track scoring in `atdrps/engine/scoring.py` reports a corroborated risk instead
+- All results are on synthetic captures from `atdrps/data/synth.py`; no public dataset (CIC-IDS, UNSW-NB15) results are reported yet
 
 ## ✅ Offline Constraint Compliance
 - ✓ No cloud APIs (entirely local)
 - ✓ No telemetry
 - ✓ No external downloads at runtime
 - ✓ Works in air-gapped networks
-- ✓ Pure Python + standard libraries only
+- ✓ No network access needed at runtime (dependencies: numpy, pandas, scipy, scikit-learn, PyYAML, Flask, matplotlib; PyTorch for the transformer)
 
 ## 📋 Pre-Demo Checklist
 - [x] All tests passing
@@ -123,4 +121,18 @@
 ---
 **Status**: ✅ READY FOR SUBMISSION
 **Last Updated**: 2026-09-15 16:52 UTC
-**Verification**: Install script fixed, 234 tests passing, prediction pipeline verified
+**Verification**: see the security audit section below
+
+## Security hardening (audit follow-up)
+
+| Issue found in audit | Fix | Regression test |
+|---|---|---|
+| pcapng section header with length 0 looped forever | block lengths validated (>= 12, multiple of 4, capped) | `tests/test_pcap.py::TestMalformedCaptures` |
+| 4 GiB record/block lengths allocated unbounded memory | 16 MiB per-record cap, `PcapFormatError` | same |
+| Bad `threshold`/`horizon` gave HTTP 500; traceback returned to client | validated, 400 with a message; no traceback in responses | `tests/test_server_hardening.py` |
+| Shared engine `threshold` mutated per request | per-request copy, analyses serialised | same |
+| XSS via CSV addresses / filenames / error text in `innerHTML` | escaping + per-response CSP nonce, `X-Frame-Options`, `nosniff` | `tests/test_dashboard_xss.py` (real Chromium) |
+| `pickle.load` / `torch.load` on model files | allowlist unpickler; `weights_only=True` | `tests/test_safe_load.py`, `tests/test_transformer.py` |
+
+Not yet done: authentication/CSRF for the dashboard (bind to localhost only),
+real-dataset evaluation, `live/` module is still not wired into the CLI or UI.

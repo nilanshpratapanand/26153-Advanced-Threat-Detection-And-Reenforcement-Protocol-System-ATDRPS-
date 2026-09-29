@@ -92,6 +92,9 @@ class CaptureOutcome:
                 "message": self.message}
 
 
+_BINARY_NAMES = frozenset({"dumpcap", "dumpcap.exe"})
+
+
 def find_dumpcap(hint: str | os.PathLike | None = None) -> Path:
     """Locate ``dumpcap``.
 
@@ -107,8 +110,10 @@ def find_dumpcap(hint: str | os.PathLike | None = None) -> Path:
         p = Path(str(raw)).expanduser()
         if p.is_dir():
             candidates += [p / "dumpcap.exe", p / "dumpcap"]
-        else:
+        elif p.name.lower() in _BINARY_NAMES:
             candidates.append(p)
+        # A hint or environment value naming any other program is ignored, not executed:
+        # this function decides what the server will run.
 
     found = shutil.which("dumpcap")
     if found:

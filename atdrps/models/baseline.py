@@ -34,6 +34,8 @@ from pathlib import Path
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
+from .safe_pickle import safe_load
+
 __all__ = ["LogisticBaseline"]
 
 
@@ -132,4 +134,4 @@ class LogisticBaseline:
     @staticmethod
     def load(path: str | Path) -> "LogisticBaseline":
         with open(Path(path), "rb") as fh:
-            return pickle.load(fh)
+            return safe_load(fh)
