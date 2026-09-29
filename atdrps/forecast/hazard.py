@@ -19,6 +19,10 @@ Design choices, each traced to something measured or published:
 
 from __future__ import annotations
 
+import json
+import pickle
+from pathlib import Path
+
 import numpy as np
 
 __all__ = ["NetworkProfile", "context_features", "HazardModel"]
@@ -131,3 +135,25 @@ class HazardModel:
         if self.calibrator is None:
             raise RuntimeError("call calibrate(val) first")
         return self.calibrator.predict(self.raw_score(context))
+
+    # ----------------------------------------------------------- persistence
+    def save(self, path) -> None:
+        """Write ``profile.json`` (plain data) and ``hazard.pkl`` (trees + calibrator)."""
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "profile.json").write_text(json.dumps(self.profile.to_dict()), encoding="utf-8")
+        with open(path / "hazard.pkl", "wb") as fh:
+            pickle.dump({"clf": self.clf, "calibrator": self.calibrator,
+                         "params": self.params, "seed": self.seed}, fh)
+
+    @classmethod
+    def load(cls, path) -> "HazardModel":
+        """Load with the restricted unpickler: a swapped ``hazard.pkl`` cannot run code."""
+        from ..models.safe_pickle import HAZARD_ALLOWED, safe_load
+        path = Path(path)
+        profile = NetworkProfile.from_dict(json.loads((path / "profile.json").read_text(encoding="utf-8")))
+        with open(path / "hazard.pkl", "rb") as fh:
+            blob = safe_load(fh, extra=HAZARD_ALLOWED)
+        model = cls(profile, seed=int(blob["seed"]))
+        model.params, model.clf, model.calibrator = blob["params"], blob["clf"], blob["calibrator"]
+        return model

@@ -6,6 +6,8 @@
     atdrps benchmark  --corpus data/corpus.npz   train everything and compare
     atdrps predict    capture.pcap               forecast from a capture
     atdrps serve                                 offline dashboard
+    atdrps train-local --benign normal.pcap      learn this network's normal, train, calibrate
+    atdrps forecast capture.pcap                 score a capture with the local model
 
 Every subcommand runs entirely locally.
 """
@@ -230,6 +232,45 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_train_local(args) -> int:
+    from .forecast.local import train_local
+
+    meta = train_local(args.benign, args.out, task=args.task, budget_per_hour=args.budget_per_hour,
+                       n_train=args.n_train, n_val=args.n_val, workers=args.workers)
+    print(f"\n{meta['disclaimer']}")
+    return 0
+
+
+def cmd_forecast(args) -> int:
+    from .forecast.local import analyse_capture
+
+    res = analyse_capture(args.model, args.capture)
+    print(BANNER)
+    print(f"source      : {args.capture}")
+    print(f"ingested    : {res['source_kind']}   windows: {res['n_windows']}   flows: {res['n_flows']}")
+    m = res["meta"]
+    print(f"model       : {m['task']} forecaster, threshold {m['threshold']:.4f}, "
+          f"budget {m['budget_per_hour']}/hour verified={m['budget_verified']}")
+    for w in res["warnings"]:
+        print(f"WARNING     : {w}")
+    if not res["windows"]:
+        return 1
+    n_alert = sum(1 for w in res["windows"] if w["alert"])
+    print(f"\nalerts: {n_alert} of {len(res['windows'])} windows, {len(res['episodes'])} episode(s)")
+    for e in res["episodes"]:
+        print(f"  windows {e['start_window']}-{e['end_window']}  ({e['n']} windows, peak score {e['peak']:.3f})")
+    top = sorted(res["windows"], key=lambda r: -r["score"])[:5]
+    print("highest-scoring windows:")
+    for r in top:
+        print(f"  window {r['window']:>4}  score {r['score']:.3f}  calibrated P {r['probability']:.3f}"
+              f"{'  ALERT' if r['alert'] else ''}")
+    print(f"\n{res['disclaimer']}")
+    if args.json:
+        Path(args.json).write_text(json.dumps(res, indent=2, default=float), encoding="utf-8")
+        print(f"json written to {args.json}")
+    return 0
+
+
 # ----------------------------------------------------------------- parsing
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atdrps", description=__doc__,
@@ -283,6 +324,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-explain", action="store_true")
     p.add_argument("--json", default=None, help="also write the result as JSON")
     p.set_defaults(func=cmd_predict)
+
+    p = sub.add_parser("train-local", help="learn ONE network's normal from its benign capture "
+                                           "and train/calibrate a forecaster for it")
+    p.add_argument("--benign", required=True, help="a pcap/pcapng of normal traffic (assumed benign)")
+    p.add_argument("--out", default="artifacts/model-local")
+    p.add_argument("--task", choices=["escalation", "onset"], default="escalation")
+    p.add_argument("--budget-per-hour", type=float, default=1.0,
+                   help="tolerated false alerts per hour (needs enough benign data to verify)")
+    p.add_argument("--n-train", type=int, default=60)
+    p.add_argument("--n-val", type=int, default=24)
+    p.add_argument("--workers", type=int, default=None)
+    p.set_defaults(func=cmd_train_local)
+
+    p = sub.add_parser("forecast", help="score a capture with a model made by train-local")
+    p.add_argument("capture")
+    p.add_argument("--model", default="artifacts/model-local")
+    p.add_argument("--json", default=None)
+    p.set_defaults(func=cmd_forecast)
 
     p = sub.add_parser("serve", help="run the offline dashboard")
     p.add_argument("--model", default="artifacts/model-linear")
