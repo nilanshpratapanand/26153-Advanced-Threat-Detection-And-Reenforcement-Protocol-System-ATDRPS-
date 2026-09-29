@@ -43,7 +43,7 @@ to happen". What can be built and *measured* is a calibrated **hazard**: P(infil
 within the next K windows | recent behaviour), reported together with the false-alarm rate
 and the warning lead time achieved at a stated alert budget.
 
-1. **Evaluation protocol first [Phase A — in progress].** Onset-conditional task (only windows with no
+1. **Evaluation protocol first [done — Phase A].** Onset-conditional task (only windows with no
    attack in the recent past), event-level recall and lead time, prevalence-adjusted
    precision, cluster-bootstrap confidence intervals, time/family-aware splits, and baselines
    including the deployable v1 model.
@@ -72,4 +72,32 @@ and the warning lead time achieved at a stated alert budget.
 
 ## 5. Evidence log
 
-(Filled in as phases complete — each row names the command that produced it.)
+(Each row names the command that produced it.)
+
+### Phase A — v1 vs simple detectors on the quiet-state onset task
+
+Command: `python -m atdrps.cli corpus --captures 64 --duration 3600 --campaigns 3 --out DIR/corpus_v1sim.npz --workers 4`
+then `python scripts/forecast_baselines_v1sim.py DIR`. Context 16 windows of 30 s, horizon K=5,
+quiet gap 3, group split by capture (train 31 / val 13 / test 19 captures). Test set: 637 quiet
+samples, 165 positive (25.9 %), **35 distinct onsets**, 472 negatives. Thresholds chosen on
+validation at a 1 % FPR budget. CIs: 200 capture-level bootstrap draws.
+
+| model | AUC [95 % CI] | AP (chance 0.259) | TPR @ 1 % FPR | event recall | median lead | precision @ onset rate 1e-3 |
+|---|---|---|---|---|---|---|
+| constant | 0.500 | 0.259 | 0.000 | 0.000 | – | – |
+| CUSUM/EWMA on recon indicators | 0.765 [0.694, 0.847] | 0.642 | 0.224 | 0.600 | 90 s | 0.018 |
+| Mahalanobis (last window) | 0.685 [0.621, 0.757] | 0.460 | 0.067 | 0.257 | 90 s | 0.005 |
+| Isolation Forest (last window) | 0.714 [0.651, 0.785] | 0.528 | 0.073 | 0.314 | 90 s | 0.008 |
+| ATDRPS v1 world model | 0.663 [0.579, 0.743] | 0.405 | 0.030 | 0.343 | 90 s | 0.003 |
+
+Reading, with caveats:
+* On genuine forecasting samples the deployed v1 model is **worse than a hand-built
+  reconnaissance detector** and worse than a stock Isolation Forest. The v1 and CUSUM
+  intervals overlap slightly (35 onsets is a small sample), so this is strong evidence,
+  not proof, that v1's learned dynamics add nothing here.
+* At a realistic onset rate of 1 in 1000 windows every model's precision is below 2 %:
+  more than 98 % of alerts would be false. This is the base-rate problem (Axelsson 2000)
+  and it is why later phases report alerts/day and precision at assumed prevalence.
+* Median lead is 90 s for all models because the simulator's reconnaissance-to-access gap is
+  5–60 s: the simulator itself caps the warning time. Phase B replaces that.
+* The corpus is 52 % attack windows. This is not a realistic prevalence (Phase B).
