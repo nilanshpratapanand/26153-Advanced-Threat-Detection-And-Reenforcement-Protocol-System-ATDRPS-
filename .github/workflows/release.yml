@@ -1,10 +1,26 @@
 name: release
 
-# Pushing a tag such as v0.2.0 publishes a GitHub release whose notes are that version's
-# section of CHANGELOG.md. Nothing is built or uploaded beyond GitHub's own source archives.
+# Publishes a GitHub release whose notes are that version's section of CHANGELOG.md.
+# Nothing is built or uploaded beyond GitHub's own source archives.
+#
+# Two ways to run it:
+#   * push a tag such as v0.2.0 (the release is made for that tag), or
+#   * run it by hand from the Actions tab with a tag name and, optionally, the commit to tag.
+#     The tag is created at that exact commit, so a release can be cut for a commit that was
+#     already reviewed and tested rather than for whatever the branch has become since.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create, for example v0.2.0"
+        required: true
+        type: string
+      target:
+        description: "Commit SHA to tag (default: the commit this workflow runs on)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -14,15 +30,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve and validate the tag and target
+        env:
+          # inputs go through the environment, never straight into the script text
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          TARGET: ${{ github.event.inputs.target }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag must look like v1.2.3, got: $TAG" >&2
+            exit 1
+          fi
+          if [ -n "$TARGET" ]; then
+            if ! printf '%s' "$TARGET" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
+              echo "target must be a commit SHA, got: $TARGET" >&2
+              exit 1
+            fi
+            sha="$(git rev-parse --verify "${TARGET}^{commit}")"
+          else
+            sha="$GITHUB_SHA"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "TARGET_SHA=$sha" >> "$GITHUB_ENV"
+          echo "releasing $TAG at $sha"
       - name: Extract the release notes for this tag
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v ver="$version" '/^## /{ if (found) exit; if ($2 == ver) { found = 1; next } } found' CHANGELOG.md > notes.md
+          version="${TAG#v}"
+          # the notes come from the tagged commit, not from whatever the workflow ran on
+          git show "${TARGET_SHA}:CHANGELOG.md" \
+            | awk -v ver="$version" '/^## /{ if (found) exit; if ($2 == ver) { found = 1; next } } found' > notes.md
           if [ ! -s notes.md ]; then
-            echo "CHANGELOG.md has no section for version $version" >&2
+            echo "CHANGELOG.md has no section for version $version at $TARGET_SHA" >&2
             exit 1
           fi
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --target "$TARGET_SHA"
+          fi
