@@ -19,6 +19,39 @@ class _Evil:
         return (os.system, (f"touch {self.marker}",))
 
 
+class TestAllowlistCoversTheInstalledScikitLearn(unittest.TestCase):
+    """The allowlist names scikit-learn internals, which move between releases.  This fits the
+    exact objects a saved HazardModel contains under whatever version is installed and checks
+    every global they need is allowed, so an upgrade fails here -- loudly, in CI -- and not in a
+    user's hands."""
+
+    def test_hazard_model_objects_only_need_allowlisted_globals(self):
+        import io
+        import warnings
+        from sklearn.ensemble import HistGradientBoostingClassifier
+        from sklearn.isotonic import IsotonicRegression
+        from atdrps.models.safe_pickle import HAZARD_ALLOWED, safe_load
+        warnings.simplefilter("ignore")
+        rng = np.random.default_rng(0)
+        X = rng.normal(size=(200, 5))
+        y = (X[:, 0] + rng.normal(size=200) > 0.8).astype(int)
+        clf = HistGradientBoostingClassifier(max_iter=10, random_state=0, class_weight="balanced").fit(X, y)
+        cal = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0).fit(clf.predict_proba(X)[:, 1], y)
+        blob = pickle.dumps({"clf": clf, "calibrator": cal})
+        requested = []
+
+        class Recorder(pickle.Unpickler):
+            def find_class(self, module, name):
+                requested.append((module, name))
+                return super().find_class(module, name)
+
+        Recorder(io.BytesIO(blob)).load()
+        missing = sorted(set(requested) - HAZARD_ALLOWED)
+        self.assertEqual(missing, [], f"add these to HAZARD_ALLOWED after reviewing them: {missing}")
+        out = safe_load(io.BytesIO(blob), extra=HAZARD_ALLOWED)      # and it really loads
+        np.testing.assert_allclose(out["clf"].predict_proba(X), clf.predict_proba(X))
+
+
 class TestSafePickle(unittest.TestCase):
     def test_allowlisted_model_objects_round_trip(self):
         from sklearn.linear_model import LogisticRegression, Ridge

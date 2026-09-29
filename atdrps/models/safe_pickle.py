@@ -55,6 +55,13 @@ HAZARD_ALLOWED: frozenset[tuple[str, str]] = frozenset({
     ("sklearn._loss.loss", "HalfBinomialLoss"), ("sklearn._loss._loss", "CyHalfBinomialLoss"),
     ("sklearn._loss.link", "LogitLink"), ("sklearn._loss.link", "Interval"),
     ("sklearn.isotonic", "IsotonicRegression"),
+    # The Cython loss class is pickled under a different module name depending on the
+    # scikit-learn version (recorded under 1.3.2, 1.4.2, 1.5.2, 1.6.1, 1.7.2 and 1.9.1):
+    #   1.3-1.4: sklearn._loss._loss.{CyHalfBinomialLoss, __pyx_unpickle_CyHalfBinomialLoss}
+    #   1.5:     _loss.{CyHalfBinomialLoss, __pyx_unpickle_CyHalfBinomialLoss}
+    #   1.6-1.7: _loss.CyHalfBinomialLoss     1.9: sklearn._loss._loss.CyHalfBinomialLoss
+    ("sklearn._loss._loss", "__pyx_unpickle_CyHalfBinomialLoss"),
+    ("_loss", "CyHalfBinomialLoss"), ("_loss", "__pyx_unpickle_CyHalfBinomialLoss"),
 })
 
 
