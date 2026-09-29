@@ -99,7 +99,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python tests/run_tests.py          # 305 tests, standard library runner (no pytest); PyTorch- and Chromium-backed tests skip when absent
+python tests/run_tests.py          # 350 tests, standard library runner (no pytest); PyTorch- and Chromium-backed tests skip when absent
 ```
 
 PyTorch is needed only for the temporal transformer backend; everything else — ingestion,
@@ -208,7 +208,7 @@ atdrps/
 app/                  offline Flask dashboard
 configs/              YAML configuration
 docs/                 architecture, attack coverage, benchmarks, slides, demo script
-tests/                305 tests, standard library runner
+tests/                350 tests, standard library runner
 ```
 
 ## Testing

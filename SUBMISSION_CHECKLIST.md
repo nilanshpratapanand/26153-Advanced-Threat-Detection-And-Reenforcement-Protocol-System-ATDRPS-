@@ -21,12 +21,12 @@ cd /home/claude/atdrps
 ### ✅ Step 2: Run Test Suite
 ```bash
 ./run.sh test
-# All 305 tests should pass
+# All 350 tests should pass
 ```
 
 **Expected Output:**
 ```
-Ran 305 tests in ~80s
+Ran 350 tests in ~80s
 OK (skipped=7)
 ```
 
@@ -88,7 +88,7 @@ ground-truth timeline -> data/demo/capture.timeline.json
 ### Code Artifacts
 - [ ] install.sh / install.bat (tested)
 - [ ] run.sh / run.bat (all commands work)
-- [ ] 305 passing tests
+- [ ] 350 passing tests
 - [ ] Dashboard interface working
 - [ ] All source code in `atdrps/` directory
 - [ ] Test suite in `tests/` directory
@@ -137,7 +137,7 @@ git push -u origin main
 ### Code
 - [ ] install.sh / install.bat: One-command setup
 - [ ] run.sh / run.bat: Easy CLI + interactive menu
-- [ ] Tests: 305 (3 skipped) passing
+- [ ] Tests: 350 (3 skipped) passing
 - [ ] No hardcoded paths (all relative)
 - [ ] No external API calls
 - [ ] No telemetry/logging to cloud
@@ -161,7 +161,7 @@ git push -u origin main
 | Metric | Target | Actual |
 |--------|--------|--------|
 | Installation time | <2 min | ✅ ~60 sec |
-| Test suite | Pass all | ✅ 305 (3 skipped) |
+| Test suite | Pass all | ✅ 350 (3 skipped) |
 | Prediction latency | <1 sec | ✅ ~0.3 sec per 80 windows |
 | Offline compliance | 100% | ✅ Zero external calls |
 | MITRE stages | 6 | ✅ All 6 working |
