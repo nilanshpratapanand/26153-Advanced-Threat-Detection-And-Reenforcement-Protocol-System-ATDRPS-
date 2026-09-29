@@ -38,6 +38,17 @@ That trajectory is what ATDRPS models.
 
 ## Results
 
+> **Read this first.** The table below is the v1 window-level benchmark on *synthetic*
+> captures. An audit showed it largely measures detecting an attack that is already under
+> way (copying the current label forward scores F1 0.898), and a real benign laptop capture
+> pushed the v1 model to near-saturated attack scores. It is kept for history only.
+> The honest, current evaluation (quiet-state onset forecasting, real background traffic,
+> confidence intervals, false-alarm accounting) is in
+> [`docs/RESEARCH_AND_PLAN_V2.md`](docs/RESEARCH_AND_PLAN_V2.md): forecasting an onset from
+> silence is not achieved; forecasting escalation once early activity is visible is
+> promising (AUC 0.94, 11 test onsets) but not field-ready.
+
+
 Held-out captures — train and test share no window, no flow and no campaign. Operating
 thresholds are chosen on the validation split and applied unchanged to test.
 

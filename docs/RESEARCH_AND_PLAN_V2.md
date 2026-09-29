@@ -129,3 +129,63 @@ network; (2) score windows relative to that network's own recent normal; (3) cal
 threshold on the network's own benign data; (4) evaluate with real background traffic plus
 injected, labelled attacks (semi-synthetic overlay) so the false-alarm side is measured on
 real data; (5) ARP (46 % of this capture) is currently discarded by the flow pipeline.
+
+### Phase B/C — real laptop background + injected campaigns (two tasks, both reported)
+
+Command: `python scripts/forecast_overlay_benchmark.py --background CAPTURE --task onset|escalation`.
+Background: the user's real 145-minute hostel Wi-Fi capture (52,010 IPv4 packets, assumed
+benign). Train / validation / test = disjoint time segments 0-55 % / 55-72 % / 72-100 % of
+the background; 60 / 24 / 30 overlays (one injected campaign each) plus benign look-alike
+decoys (Internet probes, flaky client, password typos, internal vulnerability scan) at 10/hour.
+Campaigns: 25 % skip reconnaissance, recon is targeted (35 %), slow (25 %) or noise-like
+(40 %, built to resemble background probing), recon-to-access dwell log-normal (median 240 s).
+Context 16 windows of 30 s, horizon K = 5. Thresholds are chosen on validation at 1 % FPR.
+Both tasks were declared before the second was run; neither was tuned on test data.
+
+**Task 1 — from-silence onset** (will infiltration begin within 5 windows, given no
+infiltration in the last 3?). Test: 1,448 quiet samples, 93 positive, **20 onsets**.
+
+| model | AUC [95 % CI] | AP (chance 0.064) | event recall at val. threshold |
+|---|---|---|---|
+| constant | 0.500 | 0.064 | 0 |
+| CUSUM/EWMA on recon indicators | 0.606 [0.494, 0.708] | 0.091 | 5 % |
+| Mahalanobis | 0.532 [0.454, 0.604] | 0.068 | 5 % |
+| Isolation Forest | 0.547 [0.467, 0.622] | 0.079 | 5 % |
+| v2 hazard (profile-relative GBT) | 0.518 [0.428, 0.600] | 0.085 | 5 % |
+| v1 world model | 0.570 [0.485, 0.645] | 0.076 | 0 |
+
+No model forecasts an onset from silence better than chance on this benchmark. This is
+expected from the construction, not only a modelling failure: about 25 % of onsets have no
+precursor, 40 % of reconnaissance mimics background noise, and the median recon-to-access gap
+(4 min) exceeds the 2.5-minute horizon, so few onsets have any observable precursor inside the
+horizon. It also matches the literature's warning that low-and-slow / patient adversaries
+are hard to foresee from network aggregates alone.
+
+**Task 2 — escalation** (given early-stage activity may already be visible, will lateral
+movement, C2, exfiltration or impact begin within 5 windows?). Test: 1,666 quiet samples,
+54 positive, **11 onsets**.
+
+| model | AUC [95 % CI] | AP (chance 0.032) | TPR / FPR at val. threshold | event recall | precision at onset rate 1e-3 |
+|---|---|---|---|---|---|
+| constant | 0.500 | 0.032 | 0 / 0 | 0 | – |
+| CUSUM/EWMA | 0.732 [0.670, 0.799] | 0.057 | 0 / 0.006 | 0 | 0 |
+| Mahalanobis | 0.592 [0.532, 0.659] | 0.038 | 0 / 0.012 | 0 | 0 |
+| Isolation Forest | 0.592 [0.513, 0.671] | 0.038 | 0 / 0.002 | 0 | 0 |
+| **v2 hazard** | **0.941 [0.909, 0.966]** | **0.263** | 0.037 / 0.002 | 0.18 (2 of 11), lead 60 s | 0.015 |
+| v1 world model | 0.880 [0.804, 0.941] | 0.223 | 0.093 / 0.007 | 0.18 (2 of 11), lead 135 s | 0.012 |
+
+Reading, with the limits kept visible:
+* On the escalation task the v2 hazard model ranks best (AUC 0.94, AP 8x chance). Its interval
+  overlaps v1's, so "v2 beats v1" is suggested but **not** established with 11 test onsets.
+* Ranking skill did not translate into a good operating point. At the threshold chosen on
+  validation data the test false-positive rate was 0.2 % (budget 1 %) and only 2 of 11
+  escalations were flagged in advance. The validation negatives (a different time segment)
+  did not represent the test negatives well: an example of the drift the literature warns about.
+* At a realistic onset rate of 1 in 1,000 windows, precision is about 1.5 %: over 98 % of alerts
+  would be false. No claim of field-ready accuracy is supported.
+* False alerts on the untouched real background: 0 observed in 66 clean test windows, but the
+  exact 95 % upper bound is 6.5 alerts/hour. Too little clean real data to say more.
+* The injected attacks are simulated and loud (a credential brute-force burst), and whether a
+  campaign escalates is independent of anything observable by construction. The escalation
+  skill therefore largely reflects detecting that intrusion activity is under way. One
+  background network, one vantage point.
