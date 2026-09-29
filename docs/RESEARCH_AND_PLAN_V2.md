@@ -189,3 +189,59 @@ Reading, with the limits kept visible:
   campaign escalates is independent of anything observable by construction. The escalation
   skill therefore largely reflects detecting that intrusion activity is under way. One
   background network, one vantage point.
+
+### Phase C (continued) — more data, score smoothing, and operating points
+
+Commands: `python scripts/forecast_improve.py --background CAPTURE --cache STATES.pkl`, then
+`python scripts/forecast_operating_points.py ...` (same arguments). Escalation task, real
+laptop background, **fresh test overlays** (seeds 3000-3039, same held-out time segment, so
+the background is shared with the earlier benchmark): 2,169 quiet samples, 66 positive,
+**15 distinct escalation events**. Validation: 47 overlays, 14 events. All 12 configurations
+are shown; the choice was made on validation AUC only.
+
+| training overlays | smoothing (windows) | validation AUC | test AUC [95 % CI] | event recall at the 5 %-FPR validation threshold |
+|---|---|---|---|---|
+| 60 | 1 | 0.889 | 0.960 [0.939, 0.979] | 0.67 |
+| 60 | 2 | 0.910 | 0.963 [0.945, 0.981] | 0.67 |
+| 60 | 3 | 0.924 | 0.967 [0.950, 0.983] | 0.73 |
+| 60 | 4 | 0.927 | 0.966 [0.950, 0.982] | 0.73 |
+| 120 | 1 | 0.892 | 0.966 [0.949, 0.981] | 0.73 |
+| 120 | 2 | 0.919 | 0.970 [0.954, 0.983] | 0.73 |
+| 120 | 3 | 0.934 | 0.972 [0.956, 0.983] | 0.73 |
+| 120 | 4 | 0.936 | 0.970 [0.951, 0.983] | 0.73 |
+| 240 | 1 | 0.913 | 0.967 [0.949, 0.981] | 0.73 |
+| 240 | 2 | 0.936 | 0.971 [0.957, 0.984] | 0.73 |
+| **240** | **3** | **0.946** | **0.973 [0.957, 0.985]** | **0.73** |
+| 240 | 4 | 0.946 | 0.971 [0.952, 0.984] | 0.73 |
+
+More training campaigns and smoothing help a little and consistently, but every interval
+overlaps every other: the differences are within noise for 15 events. The chosen setting
+(240 overlays, 3-window smoothing) at stricter false-alarm budgets, thresholds from validation:
+
+| budget (FPR) | test FPR | events flagged in advance | median lead | false alerts/hour on test negatives | precision if onsets are 1 in 1,000 windows |
+|---|---|---|---|---|---|
+| 0.5 % | 0.7 % | 8 / 15 | 150 s | 0.8 | 4.6 % |
+| 1 % | 1.1 % | 9 / 15 | 150 s | 1.3 | 3.6 % |
+| 2 % | 1.5 % | 10 / 15 | 150 s | 1.8 | 2.8 % |
+| 5 % | 3.7 % | 11 / 15 | 150 s | 4.5 | 1.8 % |
+
+* On the untouched real background: 0 alerts in 64 clean windows; the exact 95 % upper bound
+  is 6.7 alerts/hour, so this cannot show the false-alarm rate is low.
+* Lead time is the full 150 s horizon whenever an escalation is caught: alerts come from
+  visible early-stage activity (the simulated brute-force burst) well before lateral movement.
+* **Bottom line, stated plainly:** on this benchmark the system flags roughly half to three
+  quarters of simulated escalations about 2.5 minutes ahead at roughly one to four false alerts
+  per hour. At a realistic base rate most alerts would still be false (precision under 5 %).
+  It is a triage aid whose alerts need a human, not an accurate predictor of attacks, and
+  nothing here shows it would work on real attacks: the attacks are simulated and loud, there is
+  a single background network, and the test has 15 events.
+
+### What was not done
+
+* Phase D (real-kernel loopback lab) and Phase E (`eval-real` for CIC-IDS/UNSW/CTU-13/LANL):
+  not built. Real-dataset hosts are unreachable from the build sandbox; the `datasets.py`
+  adapters exist but have not been evaluated with this protocol.
+* The dashboard still serves the v1 engine. `atdrps train-local` / `atdrps forecast` are
+  command-line only.
+* ARP and IPv6 are ignored by the flow pipeline (46 % of the supplied laptop capture was ARP).
+* Self-updating launchers: blocked by the session's safety classifier; awaiting the user's decision.

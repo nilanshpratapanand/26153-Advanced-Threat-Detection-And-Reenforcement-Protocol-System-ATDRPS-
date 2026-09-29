@@ -45,8 +45,11 @@ That trajectory is what ATDRPS models.
 > The honest, current evaluation (quiet-state onset forecasting, real background traffic,
 > confidence intervals, false-alarm accounting) is in
 > [`docs/RESEARCH_AND_PLAN_V2.md`](docs/RESEARCH_AND_PLAN_V2.md): forecasting an onset from
-> silence is not achieved; forecasting escalation once early activity is visible is
-> promising (AUC 0.94, 11 test onsets) but not field-ready.
+> silence is not achieved; forecasting escalation once early activity is visible flags about
+> half to three quarters of simulated escalations ~2.5 min ahead at 1-4 false alerts/hour
+> (15 test events, one background network, simulated attacks) -- a triage aid, not field-ready.
+> To try it on your own network: `atdrps train-local --benign normal.pcap`, then
+> `atdrps forecast capture.pcap` (see the notes on benign-data length in that document).
 
 
 Held-out captures — train and test share no window, no flow and no campaign. Operating
