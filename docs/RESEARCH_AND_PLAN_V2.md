@@ -101,3 +101,31 @@ Reading, with caveats:
 * Median lead is 90 s for all models because the simulator's reconnaissance-to-access gap is
   5–60 s: the simulator itself caps the warning time. Phase B replaces that.
 * The corpus is 52 % attack windows. This is not a realistic prevalence (Phase B).
+
+### Real-traffic check of v1 (user-supplied laptop capture on hostel Wi-Fi)
+
+Command: `python scripts/real_capture_check.py SCRATCH CAPTURES` with a v1 linear model trained
+on the 64-capture simulator corpus above (`atdrps train --backend numpy`). The real capture is
+145 minutes, 96,124 frames (54 % IPv4, 46 % ARP, no IPv6), 291 windows of 30 s, one host = 54 %
+of packets. It has **no attack labels**; it is assumed mostly benign (not verified).
+
+| capture | windows | raw attack prob. mean / p90 / max | windows >= 0.85 | "CONFIRMED" | median abs z vs simulator benign |
+|---|---|---|---|---|---|
+| real laptop, 145 min | 291 | 0.94 / 1.00 / 1.00 | 258 | 57 | 1.64 |
+| real laptop, 24 s | 1 | (too short for a 16-window context) | – | – | 1.62 |
+| crafted "benign_safe" (simulator address plan) | 40 | 0.07 / 0.14 / 0.27 | 0 | 0 | 1.14 |
+| crafted "preattack_threshold_085" (simulator address plan) | 80 | 1.00 / 1.00 / 1.00 | 65 | 36 | 1.23 |
+| reference: simulator benign windows | – | – | – | – | 0.34 |
+
+Reading: v1 saturates on real traffic. The user's own dashboard run (a different training run)
+showed the same failure in milder form (probability 0.3-0.87 across all windows; peak window
+= a ZeroTier UDP keepalive plus a 3-packet HTTPS exchange, read as beacon/exfiltration, with
+the rule engine "corroborating" because it keys on the same periodicity). Two crafted files
+that use the simulator's address plan separate as intended, which shows the tool responds to
+traffic built like its training data, and nothing about real attacks.
+
+Consequences for the design: (1) sim-trained absolute thresholds must not be used on a new
+network; (2) score windows relative to that network's own recent normal; (3) calibrate the alert
+threshold on the network's own benign data; (4) evaluate with real background traffic plus
+injected, labelled attacks (semi-synthetic overlay) so the false-alarm side is measured on
+real data; (5) ARP (46 % of this capture) is currently discarded by the flow pipeline.
