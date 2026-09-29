@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-__all__ = ["OnsetSamples", "build_onset_samples", "split_groups", "evaluate", "contexts_from_states",
+__all__ = ["OnsetSamples", "build_onset_samples", "split_groups", "evaluate", "contexts_from_states", "LATE_STAGES",
            "threshold_for_fpr", "PREVALENCES", "FPR_BUDGETS"]
 
 PREVALENCES = (1e-2, 1e-3, 1e-4)      # assumed real onset rate per window
@@ -76,14 +76,26 @@ class OnsetSamples:
                 f"quiet gap {self.quiet_gap}")
 
 
+LATE_STAGES = ("LateralMovement", "CommandAndControl", "Exfiltration", "Impact")
+
+
 def build_onset_samples(captures, context: int = 16, horizon: int = 5,
-                        quiet_gap: int = 3, group_offset: int = 0) -> OnsetSamples:
+                        quiet_gap: int = 3, group_offset: int = 0,
+                        positive_stages=None) -> OnsetSamples:
     """Turn labelled, windowed captures into quiet-state forecasting samples.
 
     ``captures`` are :class:`~atdrps.data.windows.WindowedStates`.  A sample is dropped if
     any label it depends on is marked invalid, so unlabelled stretches never become
     silent negatives.
+
+    ``positive_stages`` chooses what counts as "active".  ``None`` uses the capture's
+    infiltration flag (Initial Access onwards: the *from-silence onset* task).  Passing
+    ``LATE_STAGES`` defines the *escalation* task instead: reconnaissance and initial access
+    stay observable precursors, and the question becomes whether compromise spreads
+    (lateral movement, command-and-control, exfiltration, impact) within the horizon.
     """
+    from ..data.schema import STAGES
+    late_idx = None if positive_stages is None else [STAGES.index(x) for x in positive_stages]
     if context < 1 or horizon < 1 or quiet_gap < 1:
         raise ValueError("context, horizon and quiet_gap must all be >= 1")
     ctx, y, steps, grp, tt, oid = [], [], [], [], [], []
@@ -95,7 +107,8 @@ def build_onset_samples(captures, context: int = 16, horizon: int = 5,
             feature_names, window_s = list(cap.feature_names), float(cap.window_size_s)
         elif list(cap.feature_names) != feature_names:
             raise ValueError("captures disagree on the feature space")
-        a = np.asarray(cap.infiltration).astype(np.int8)
+        a = (np.asarray(cap.infiltration).astype(np.int8) if late_idx is None
+             else np.isin(np.asarray(cap.stage), late_idx).astype(np.int8))
         valid = np.asarray(cap.stage_mask).astype(bool)
         onset_ids: dict[int, int] = {}
         for t in range(max(context, quiet_gap) - 1, n - horizon):

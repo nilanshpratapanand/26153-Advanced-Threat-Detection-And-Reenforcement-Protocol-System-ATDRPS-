@@ -9,6 +9,7 @@ on validation overlays at ``--budget`` false-positive rate.  The pure background
 
 import argparse
 import json
+import pickle
 import sys
 import time
 from pathlib import Path
@@ -23,7 +24,7 @@ from atdrps.forecast.baselines import (                             # noqa: E402
 from atdrps.forecast.corpus import SEGMENTS, background_only_states, build_overlay_states  # noqa: E402
 from atdrps.forecast.hazard import HazardModel, NetworkProfile      # noqa: E402
 from atdrps.forecast.protocol import (                              # noqa: E402
-    build_onset_samples, contexts_from_states, evaluate, threshold_for_fpr)
+    LATE_STAGES, build_onset_samples, contexts_from_states, evaluate, threshold_for_fpr)
 
 
 def main():
@@ -36,6 +37,10 @@ def main():
     ap.add_argument("--n-train", type=int, default=60)
     ap.add_argument("--n-val", type=int, default=24)
     ap.add_argument("--n-test", type=int, default=30)
+    ap.add_argument("--task", choices=["onset", "escalation"], default="onset",
+                    help="onset: will infiltration begin from quiet?  escalation: will compromise "
+                         "spread (lateral movement/C2/exfiltration/impact) given early-stage activity?")
+    ap.add_argument("--cache", default=None, help="pickle file for the built window sequences")
     ap.add_argument("--skip-v1", action="store_true")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
@@ -45,13 +50,23 @@ def main():
     print(f"background: {len(bg.records)} IPv4 packets, {(bg.t1 - bg.t0) / 60:.0f} min, "
           f"{len(bg.peers)} peer hosts")
     segs = {k: bg.segment(*v) for k, v in SEGMENTS.items()}
-    data, states, bgonly = {}, {}, {}
-    for name, n, base in (("train", a.n_train, 0), ("val", a.n_val, 1000), ("test", a.n_test, 2000)):
-        states[name] = build_overlay_states(segs[name], range(base, base + n), window_s=a.window,
-                                            n_campaigns=1)
-        bgonly[name] = background_only_states(segs[name], window_s=a.window)
-        data[name] = build_onset_samples(states[name], context=a.context, horizon=a.horizon)
-        print(f"  {name}: {len(states[name])} overlays, {data[name].describe()}   "
+    if a.cache and Path(a.cache).exists():
+        states, bgonly = pickle.loads(Path(a.cache).read_bytes())
+        print(f"loaded window sequences from {a.cache}")
+    else:
+        states, bgonly = {}, {}
+        for name, n, base in (("train", a.n_train, 0), ("val", a.n_val, 1000), ("test", a.n_test, 2000)):
+            states[name] = build_overlay_states(segs[name], range(base, base + n), window_s=a.window,
+                                                n_campaigns=1)
+            bgonly[name] = background_only_states(segs[name], window_s=a.window)
+        if a.cache:
+            Path(a.cache).write_bytes(pickle.dumps((states, bgonly)))
+    positive = LATE_STAGES if a.task == "escalation" else None
+    data = {}
+    for name in ("train", "val", "test"):
+        data[name] = build_onset_samples(states[name], context=a.context, horizon=a.horizon,
+                                         positive_stages=positive)
+        print(f"  {name} [{a.task}]: {len(states[name])} overlays, {data[name].describe()}   "
               f"[{time.time() - t0:.0f}s]")
 
     profile = NetworkProfile().fit(bgonly["train"].X)
@@ -75,18 +90,22 @@ def main():
         r["real_background_false_alert_rate"] = float((bs >= thr).mean()) if len(bs) else float("nan")
         r["real_background_false_alerts_per_hour"] = r["real_background_false_alert_rate"] * 3600 / a.window
         r["real_background_windows"] = int(len(bs))
+        k, n_bg = int((bs >= thr).sum()), int(len(bs))
+        from scipy.stats import beta
+        upper = float(beta.ppf(0.975, k + 1, n_bg - k)) if 0 < n_bg and k < n_bg else float("nan")
+        r["real_background_false_alerts_per_hour_upper95"] = upper * 3600 / a.window
         rows.append((m.name, r))
 
-    print(f"\ntest: {data['test'].describe()}")
+    print(f"\ntask={a.task}   test: {data['test'].describe()}")
     print(f"real-background test windows (assumed benign): {len(bg_ctx)}\n")
     hdr = (f"{'model':40s} {'AUC [95% CI]':22s} {'AP':>6s} {'TPR@val-thr':>11s} {'FPR':>6s} "
-           f"{'evt recall':>10s} {'lead s':>7s} {'PPV@1e-3':>9s} {'real-bg FA/h':>13s}")
+           f"{'evt recall':>10s} {'lead s':>7s} {'PPV@1e-3':>9s} {'real-bg FA/h (95% upper)':>26s}")
     print(hdr)
     for n, r in rows:
         o, (lo, hi) = r["operating"], r["ci95"]["auc"]
         print(f"{n:40s} {r['auc']:.3f} [{lo:.3f},{hi:.3f}]  {r['ap']:6.3f} {o['tpr']:11.3f} {o['fpr']:6.3f} "
               f"{o['event_recall']:10.3f} {o['median_lead_s']:7.0f} {o['ppv@0.001']:9.4f} "
-              f"{r['real_background_false_alerts_per_hour']:13.1f}")
+              f"{r['real_background_false_alerts_per_hour']:8.1f} ({r['real_background_false_alerts_per_hour_upper95']:5.1f})")
     if a.out:
         Path(a.out).write_text(json.dumps({n: r for n, r in rows}, indent=2, default=float))
         print("\nwrote", a.out)

@@ -7,7 +7,7 @@ import numpy as np
 
 from atdrps.data.windows import WindowedStates
 from atdrps.forecast.protocol import (
-    build_onset_samples, evaluate, split_groups, threshold_for_fpr,
+    LATE_STAGES as LATE, build_onset_samples, evaluate, split_groups, threshold_for_fpr,
 )
 
 
@@ -72,6 +72,34 @@ class TestBuild(unittest.TestCase):
         s = build_onset_samples([_cap(ACTIVE), _cap(ACTIVE)], context=3, horizon=3, quiet_gap=2)
         self.assertEqual(set(np.unique(s.group)), {0, 1})
         self.assertEqual(s.n_events, 4)
+
+
+class TestEscalationTask(unittest.TestCase):
+    def test_positive_stages_redefines_the_target(self):
+        from atdrps.data.schema import STAGES
+        n = 24
+        cap = _cap([0] * n)
+        stage = np.zeros(n, dtype=np.int64)
+        stage[5:8] = STAGES.index("InitialAccess")          # precursor, not a target
+        stage[12:15] = STAGES.index("LateralMovement")      # the escalation
+        cap.stage = stage
+        cap.infiltration = (stage >= STAGES.index("InitialAccess")).astype(np.int64)
+        late = build_onset_samples([cap], context=3, horizon=3, quiet_gap=2, positive_stages=LATE)
+        onsets = {int(t) + int(k) for t, k in zip(late.t[late.onset_in_k == 1], late.steps_to_onset[late.onset_in_k == 1])}
+        self.assertEqual(onsets, {12})                      # the IA burst at 5 is not an onset here
+        infil = build_onset_samples([cap], context=3, horizon=3, quiet_gap=2)
+        self.assertIn(5, {int(t) + int(k) for t, k in zip(infil.t[infil.onset_in_k == 1], infil.steps_to_onset[infil.onset_in_k == 1])})
+
+    def test_precursor_windows_stay_usable_as_samples(self):
+        from atdrps.data.schema import STAGES
+        n = 24
+        cap = _cap([0] * n)
+        stage = np.zeros(n, dtype=np.int64)
+        stage[5:9] = STAGES.index("InitialAccess")
+        stage[12:14] = STAGES.index("LateralMovement")
+        cap.stage = stage
+        late = build_onset_samples([cap], context=3, horizon=4, quiet_gap=2, positive_stages=LATE)
+        self.assertTrue(any(int(t) in (6, 7, 8) for t in late.t))   # samples taken *during* IA
 
 
 class TestScoring(unittest.TestCase):
