@@ -75,6 +75,33 @@ floor.
 
 Full tables, per-class scores and confusion matrices: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
+### Two studies the headline table cannot answer
+
+**Does dual-level fusion earn its cost?** Same split, same model, only the input
+changes ([`docs/ABLATION.md`](docs/ABLATION.md)):
+
+| input | F1 | FPR | Stage acc. |
+|---|---|---|---|
+| flow-derived only (80 dims — what a NetFlow export gives you) | 0.8952 | **0.0463** | 0.8375 |
+| packet-derived only (23 dims) | 0.8661 | 0.1776 | 0.7738 |
+| **both (103 dims, 16-window context)** | **0.9294** | 0.0734 | 0.8400 |
+| both, no history (context = 1) | 0.8459 | 0.1892 | 0.7600 |
+
+Fusion buys **+0.034 F1** over the better half and temporal context buys
+**+0.084 F1** over the same features with no history — but flow-only has the
+lower false-positive rate, so fusion is trading precision for recall rather
+than dominating. That trade is stated in the report, not smoothed over.
+
+**Does it survive an attack family it was never trained on?** Every capture
+containing lateral movement was removed from training *and* validation
+([`docs/HOLDOUT.md`](docs/HOLDOUT.md)). The alarm still fires on **29.6%** of
+unseen lateral-movement windows at a **0.9%** benign false-alarm rate, ranking
+them above background at AUC 0.729. That is partial transfer, not novel-attack
+detection, and the stage head cannot name a class it never saw — reported as
+the zero it is. A signature-based detector recovers none of an unseen family by
+construction, which is the comparison worth making; it is not a claim that
+ATDRPS detects unknown attacks in general.
+
 ## Design constraints we took seriously
 
 * **Fully offline.** No cloud APIs, no telemetry, no runtime downloads. Critical
@@ -99,7 +126,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python tests/run_tests.py          # 350 tests, standard library runner (no pytest); PyTorch- and Chromium-backed tests skip when absent
+python tests/run_tests.py          # standard-library runner (no pytest); PyTorch- and Chromium-backed tests skip when absent
 ```
 
 PyTorch is needed only for the temporal transformer backend; everything else — ingestion,
@@ -130,6 +157,12 @@ python -m atdrps.cli predict data/demo/capture.pcap
 # 5. the offline dashboard
 python -m atdrps.cli serve
 #    -> http://127.0.0.1:8501
+
+# 6. the two studies: dual-level ablation, and an attack family held out entirely
+python -m atdrps.cli study ablation --corpus data/corpus.npz
+python scripts/make_corpus.py --captures 40 --holdout-stage LateralMovement \
+    --seed0 7000 --out data/corpus-holdout-lateral.npz
+python -m atdrps.cli study holdout --corpus data/corpus-holdout-lateral.npz
 ```
 
 ### Using real datasets

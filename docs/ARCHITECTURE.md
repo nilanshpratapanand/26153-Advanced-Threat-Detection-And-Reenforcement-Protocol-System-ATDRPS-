@@ -108,8 +108,43 @@ validation loss bottomed at epoch 3 and rose for eight more while training loss 
 three-layer encoder — an overfitting result, not a capacity ceiling. So the linear
 backend ships as default and the transformer is reported beside it, not dropped.
 
+Two further studies, each with its own corpus or split and therefore reported
+separately (`docs/ABLATION.md`, `docs/HOLDOUT.md`). **Ablation**: flow-derived
+features alone score F1 0.8952, packet-derived alone 0.8661, both 0.9294, and
+the same features with no history 0.8459 — fusion is worth +0.034 and temporal
+context +0.084, though flow-only keeps the lower FPR, so fusion trades
+precision for recall. **Attack-family holdout**: with every lateral-movement
+capture removed from training and validation, the alarm still fires on 29.6% of
+unseen lateral-movement windows at a 0.9% benign false-alarm rate (AUC 0.729).
+Partial transfer, not novel-attack detection — and the stage head cannot emit a
+class it never saw, which is reported as a zero.
+
 Weakest stage is **Impact** (F1 0.491 on 32 test windows, too rare here to learn —
 reported rather than hidden). Full breakdown in `docs/BENCHMARKS.md`.
+
+## 6b. Knowing when not to answer
+
+A model fitted on one traffic distribution will score a capture from another
+one without complaint, and produce confident numbers doing it. A 145-minute
+capture of ordinary university wifi -- no attack in it -- was scored
+**CONFIRMED Exfiltration at 0.96**. The cause was not the model: 54 of the 103
+state dimensions in that capture sat more than three standard deviations
+outside the training distribution, several of them infinitely outside, because
+the generator emits exactly zero for TTL inconsistency, RST injection ratio and
+inbound flow share. A linear model asked to extrapolate there extrapolates
+without limit.
+
+Every model already ships the z-score envelope its rollout clamp uses, so the
+guard is a fraction: how many of a window's dimensions fall outside the range
+the training data covered. Measured over the 8,640-window training corpus that
+fraction has median 0.000 and p95 0.0097; over the real capture, median 0.204.
+Above a median of 0.10 the headline becomes **VERDICT WITHHELD** and the scores
+are labelled unverified. Features the training data never varied are treated
+separately: their envelope is meaningless, so any other value is outside.
+
+This does not decide whether traffic is malicious. It decides whether the model
+is entitled to an opinion, and it is the honest answer to the gap that the
+benchmark corpus is generated rather than captured.
 
 ## 7. Deployment posture
 

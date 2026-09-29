@@ -8,6 +8,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -159,7 +160,15 @@ class TestEngine(unittest.TestCase):
             result = _Fixture.engine.analyse(info["pcap"])
         self.assertEqual(result.timeline, [])
         self.assertTrue(result.notes)
-        self.assertIn("context", result.notes[0])
+        note = result.notes[0]
+        # the note has to be actionable at a terminal: how many windows are
+        # missing, and how long a capture would actually be long enough
+        self.assertIn("window", note)
+        self.assertRegex(note, r"\d+ minutes", "the note must name a concrete duration")
+        # never tell someone to shrink the window: the model was fitted at one
+        # window size and states from another are out of its training
+        # distribution
+        self.assertNotIn("reduce window size", note)
 
     def test_detects_the_injected_campaign(self):
         """A capture containing a real kill chain must not score flat.
@@ -243,6 +252,126 @@ class TestDashboard(unittest.TestCase):
                                     content_type="multipart/form-data")
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.get_json())
+
+
+class TestCaptureEndpoints(unittest.TestCase):
+    """The buttons that produce a capture in the first place.
+
+    The generate path runs for real -- it is the demo fallback that has to work
+    with no network, no Wireshark and no privilege, so a test that mocked it
+    would be testing nothing. The dumpcap path is checked for its refusals and
+    its error reporting; that it can drive dumpcap is covered by
+    ``test_dumpcap``.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _Fixture.setup()
+        import app.server as server
+
+        cls.server = server
+        cls.model_dir = tempfile.mkdtemp()
+        _Fixture.model.save(cls.model_dir)
+        np.save(Path(cls.model_dir) / "background.npy",
+                _Fixture.engine.explainer.background)
+        cls.workspace = Path(tempfile.mkdtemp()) / "captures"
+        cls._saved_workspace = server.WORKSPACE
+        server.WORKSPACE = cls.workspace
+        cls.app = server.create_app(model_dir=cls.model_dir)
+        cls.app.config.update(TESTING=True)
+        cls.client = cls.app.test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.WORKSPACE = cls._saved_workspace
+
+    def _await(self, job: str, timeout: float = 300.0) -> dict:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            payload = self.client.get(f"/api/capture/job/{job}").get_json()
+            if payload["state"] in {"done", "error"}:
+                return payload
+            time.sleep(0.5)
+        self.fail(f"job {job} did not finish within {timeout:.0f}s")
+
+    def test_generates_a_pcap_and_analyses_it(self):
+        response = self.client.post("/api/capture/generate", json={
+            "kind": "pcap", "seconds": 900, "campaigns": 2, "seed": 4242,
+            "horizon": HORIZON, "explain": False,
+        })
+        self.assertEqual(response.status_code, 200)
+        job = self._await(response.get_json()["job"])
+        self.assertEqual(job["state"], "done", job.get("error"))
+        self.assertTrue(Path(job["file"]).is_file())
+        self.assertTrue(job["result"]["synthetic"],
+                        "generated traffic must be labelled synthetic everywhere")
+        self.assertGreater(len(job["result"]["ground_truth"]), 0)
+
+    def test_the_csv_export_round_trips_to_the_same_verdict(self):
+        """A flow CSV written by ATDRPS must read back as the same capture.
+
+        This is the regression for a real defect: the CSV export used the
+        canonical column names, and the CSV *loader* only recognised other
+        datasets' spellings of them, so a generated CSV came back as 13 of 71
+        features and scored 0.00 on traffic containing a full kill chain.
+        """
+        common = {"seconds": 900, "campaigns": 2, "seed": 4242,
+                  "horizon": HORIZON, "explain": False}
+        pcap_job = self._await(self.client.post(
+            "/api/capture/generate", json={"kind": "pcap", **common}).get_json()["job"])
+        csv_job = self._await(self.client.post(
+            "/api/capture/generate", json={"kind": "csv", **common}).get_json()["job"])
+        self.assertEqual(pcap_job["state"], "done", pcap_job.get("error"))
+        self.assertEqual(csv_job["state"], "done", csv_job.get("error"))
+        self.assertEqual(csv_job["result"]["n_windows"], pcap_job["result"]["n_windows"])
+        self.assertEqual(csv_job["result"]["headline"], pcap_job["result"]["headline"])
+
+    def test_generate_rejects_nonsense(self):
+        for body in ({"kind": "exe"}, {"kind": "pcap", "seconds": 5},
+                     {"kind": "pcap", "seconds": 99999},
+                     {"kind": "pcap", "campaigns": 99},
+                     {"kind": "pcap", "seconds": "soon"}):
+            self.assertEqual(
+                self.client.post("/api/capture/generate", json=body).status_code, 400,
+                f"{body} should have been rejected",
+            )
+
+    def test_capture_start_validates_before_touching_dumpcap(self):
+        self.assertEqual(
+            self.client.post("/api/capture/start",
+                             json={"interface": "", "seconds": 60}).status_code, 400)
+        self.assertEqual(
+            self.client.post("/api/capture/start",
+                             json={"interface": "1", "seconds": 2}).status_code, 400)
+        self.assertEqual(
+            self.client.post("/api/capture/start",
+                             json={"interface": "1", "seconds": 99999}).status_code, 400)
+
+    def test_missing_dumpcap_is_a_503_that_says_what_to_install(self):
+        from unittest import mock
+
+        import atdrps.live.dumpcap as dumpcap_mod
+
+        with mock.patch.object(dumpcap_mod, "find_dumpcap",
+                               side_effect=dumpcap_mod.DumpcapMissing("install wireshark")):
+            response = self.client.get("/api/capture/interfaces")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("install wireshark", response.get_json()["error"])
+
+    def test_download_refuses_to_leave_the_workspace(self):
+        for name in ("../../etc/passwd", "..%2f..%2fsecret", "nope.pcap"):
+            status = self.client.get(f"/api/capture/download/{name}").status_code
+            self.assertIn(status, (400, 404), name)
+
+    def test_download_returns_a_file_the_dashboard_produced(self):
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        (self.workspace / "sample.pcap").write_bytes(b"\xd4\xc3\xb2\xa1" + b"\0" * 20)
+        response = self.client.get("/api/capture/download/sample.pcap")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 24)
+
+    def test_unknown_job_is_a_404(self):
+        self.assertEqual(self.client.get("/api/capture/job/nope").status_code, 404)
 
 
 class TestCli(unittest.TestCase):

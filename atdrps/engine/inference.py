@@ -82,6 +82,7 @@ class AnalysisResult:
     n_flows: int = 0
     notes: list[str] = field(default_factory=list)
     verdicts: list[dict] = field(default_factory=list)
+    novelty: "NoveltyReport | None" = None
 
     @property
     def peak_risk(self) -> float:
@@ -112,6 +113,16 @@ class AnalysisResult:
         """One line that distinguishes what is seen from what is expected."""
         if not self.timeline:
             return "not enough traffic to forecast"
+
+        # A model scoring traffic unlike anything it was fitted on is not
+        # entitled to the word CONFIRMED.  Withholding the verdict is the only
+        # honest answer: the numbers are still shown, but the headline says
+        # what they are worth.  This is what stops a capture of ordinary wifi
+        # being announced as confirmed exfiltration.
+        if self.novelty is not None and self.novelty.verdict == "outside":
+            return (f"VERDICT WITHHELD -- traffic outside the model's training "
+                    f"distribution (peak raw probability "
+                    f"{self.raw_peak_probability:.2f}, not trustworthy here)")
 
         confirmed, predicted = self.confirmed, self.predicted
         if confirmed:
@@ -188,12 +199,37 @@ class ThreatForecastEngine:
         )
         L = self.model.context
         if len(states) < L:
+            # Say how long a capture actually has to be, in seconds, because
+            # "needs 16 windows of context" is not an instruction anyone can
+            # act on while standing at a terminal.  Deliberately *not*
+            # suggesting a smaller window: the model was fitted on states
+            # aggregated over ``window_size_s``, and feeding it windows of a
+            # different length hands it features drawn from a distribution it
+            # never saw.  It would produce numbers.  They would not mean
+            # anything.
+            need_s = (L + 1) * self.window_size_s
             result.notes.append(
-                f"capture covers {len(states)} windows but the model needs {L} "
-                f"of context; extend the capture or reduce window size"
+                f"capture covers {len(states)} window(s) but the world model "
+                f"needs {L} windows of history before it can forecast anything. "
+                f"At {self.window_size_s:g}s windows that is about "
+                f"{need_s / 60:.0f} minutes of traffic; capture for 10 minutes "
+                f"or more (dumpcap -a duration:600) and try again."
             )
             return result
         return self._score(states, flows, result, horizon, explain, max_flagged)
+
+    def _attach_novelty(self, states, result) -> None:
+        """Measure the capture against the envelope the model was fitted on."""
+        from .novelty import assess_novelty
+
+        standardiser = getattr(self.model, "standardiser", None)
+        if standardiser is None:
+            return
+        report = assess_novelty(states.X, standardiser, list(states.feature_names))
+        result.novelty = report
+        message = report.message()
+        if message:
+            result.notes.insert(0, message)
 
     def analyse_states(self, states, flows, source: str = "in-memory",
                        horizon: int | None = None, explain: bool = True,
@@ -207,6 +243,7 @@ class ThreatForecastEngine:
         return self._score(states, flows, result, horizon, explain, max_flagged)
 
     def _score(self, states, flows, result, horizon, explain, max_flagged):
+        self._attach_novelty(states, result)
         L = self.model.context
         X = states.X
         contexts = np.stack([X[t - L + 1:t + 1] for t in range(L - 1, len(states))])
@@ -336,6 +373,7 @@ def serialise_result(result: AnalysisResult) -> dict:
         "timeline": result.timeline,
         "forecast": result.forecast.timeline() if result.forecast else [],
         "flagged_flows": result.flagged_flows,
+        "novelty": result.novelty.as_dict() if result.novelty else None,
     }
     explanation = result.explanation
     if explanation:

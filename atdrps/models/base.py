@@ -87,12 +87,18 @@ class Standardiser:
         # autoregressive roll-outs inside the region the model was trained on
         self.lo: np.ndarray | None = None
         self.hi: np.ndarray | None = None
+        # features the training data never varied.  Scaling gives them unit
+        # scale so they pass through as zeros, which is right for training but
+        # loses the fact that the data says *nothing* about any other value --
+        # the novelty guard needs that fact, so it is recorded here.
+        self.constant: np.ndarray | None = None
 
     def fit(self, X: np.ndarray) -> "Standardiser":
         flat = X.reshape(-1, X.shape[-1]).astype(np.float64)
         self.mean = flat.mean(axis=0)
         std = flat.std(axis=0)
-        self.scale = np.where(std < 1e-8, 1.0, std)
+        self.constant = std < 1e-8
+        self.scale = np.where(self.constant, 1.0, std)
         z = (flat - self.mean) / self.scale
         # 0.5/99.5 percentiles, widened a little: generous enough not to clip
         # real behaviour, tight enough to stop a roll-out running away
@@ -126,6 +132,8 @@ class Standardiser:
             "mean": self.mean.tolist(), "scale": self.scale.tolist(),
             "lo": None if self.lo is None else self.lo.tolist(),
             "hi": None if self.hi is None else self.hi.tolist(),
+            "constant": None if self.constant is None
+                        else [bool(b) for b in self.constant],
         }
 
     @classmethod
@@ -136,6 +144,16 @@ class Standardiser:
         if data.get("lo") is not None:
             obj.lo = np.asarray(data["lo"], dtype=np.float64)
             obj.hi = np.asarray(data["hi"], dtype=np.float64)
+        if data.get("constant") is not None:
+            obj.constant = np.asarray(data["constant"], dtype=bool)
+        elif obj.lo is not None:
+            # a checkpoint written before this field existed: a constant column
+            # standardises to all-zero, so its widened percentile envelope is
+            # exactly [-1, +1] at unit scale.  Recovering it this way costs
+            # nothing and keeps old models usable with the novelty guard.
+            obj.constant = (np.isclose(obj.scale, 1.0)
+                            & np.isclose(obj.lo, -1.0)
+                            & np.isclose(obj.hi, 1.0))
         return obj
 
 

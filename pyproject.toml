@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "atdrps"
-version = "0.1.0"
+version = "0.2.0"
 description = "ATDRPS - Advanced Threat Detection and Reinforcement Protocol System: a world model for network attack forecasting (SIH 2026, PS 26153, NTRO)"
 readme = "README.md"
 requires-python = ">=3.9"

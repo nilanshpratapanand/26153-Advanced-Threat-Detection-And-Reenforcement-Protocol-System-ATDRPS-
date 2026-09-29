@@ -44,6 +44,8 @@ def _payload(stage):
             "flagged_flows": [{"src": EVIL, "dst": EVIL, "protocol": EVIL, "packets": 1,
                                "bytes": 5, "duration": 1, "flags": EVIL,
                                "payload_zero_ratio": 0, "retransmissions": 0}],
+            "novelty": {"verdict": "outside", "message": EVIL, "median_fraction": 0.9,
+                        "worst_features": []},
             "explanation": {"stage": stage, "stage_description": EVIL, "prediction": .5,
                             "base_value": .1,
                             "drivers": [{"description": EVIL, "contribution": .3}],
@@ -85,7 +87,7 @@ class TestDashboardEscaping(unittest.TestCase):
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=_chromium(), args=["--no-sandbox"])
             try:
-                for mode in ("payload", "error", "filename", "benign"):
+                for mode in ("payload", "error", "filename", "benign", "iface"):
                     page = browser.new_page()
                     page.route("**/api/health", lambda r, _q: r.fulfill(json={"ok": True, "model": "d"}))
 
@@ -98,22 +100,30 @@ class TestDashboardEscaping(unittest.TestCase):
                         return handler
 
                     page.route("**/api/analyse", make(mode))
+                    page.route("**/api/capture/interfaces", lambda r, _q: r.fulfill(
+                        status=503, json={"ok": False, "error": "no dumpcap " + EVIL}))
                     page.goto(f"http://127.0.0.1:{port}/")
                     name = ("x" + EVIL + ".csv") if mode == "filename" else "a.csv"
                     path = os.path.join(tempfile.mkdtemp(), name)
                     with open(path, "w") as fh:
                         fh.write("a,b\n1,2\n")
-                    page.set_input_files("#capture", path)
-                    page.click("#go")
-                    page.wait_for_function(
-                        "document.querySelector('#go').disabled === false", timeout=5000)
+                    if mode == "iface":
+                        page.click("#ifacesBtn")
+                        page.wait_for_timeout(600)
+                    else:
+                        page.set_input_files("#capture", path)
+                        page.click("#go")
+                        page.wait_for_function(
+                            "document.querySelector('#go').disabled === false", timeout=5000)
                     out[mode] = {
                         "executed": page.evaluate("window.__pwn || 0"),
                         "injected": page.evaluate(
-                            "document.querySelectorAll('#results img, #status img').length"),
+                            "document.querySelectorAll('#results img, #status img, #sourceStatus img, "
+                            "#oodBox img, #verdictText img').length"),
                         "visible": page.evaluate(
                             "!document.querySelector('#results').classList.contains('hidden')"),
                         "status": page.evaluate("document.querySelector('#status').innerText"),
+                        "source_status": page.evaluate("document.querySelector('#sourceStatus').innerText"),
                     }
                     page.close()
             finally:
@@ -126,6 +136,7 @@ class TestDashboardEscaping(unittest.TestCase):
             self.assertEqual(r["executed"], 0, f"{mode}: injected script ran")
             self.assertEqual(r["injected"], 0, f"{mode}: attacker markup reached the DOM")
         self.assertTrue(out["benign"]["visible"], "benign results did not render")
+        self.assertIn("no dumpcap <img", out["iface"]["source_status"])   # shown literally
         self.assertTrue(out["payload"]["visible"])
         self.assertFalse(out["error"]["visible"])
         self.assertIn("bad column <img", out["error"]["status"])   # shown literally
